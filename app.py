@@ -1,4 +1,4 @@
-"""Sahaayak Triage — transparent, rules-based helpline transcript demo.
+"""AI-Based Help Line Triage — transparent, rules-based helpline transcript demo.
 
 This prototype is intended for fictional/demo transcripts and human review only.
 It is not a validated emergency-risk model and must not dispatch services.
@@ -20,7 +20,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Page setup and styling
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Sahaayak Triage",
+    page_title="AI-Based Help Line Triage",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -42,7 +42,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🛡️ Sahaayak Triage")
+st.title("🛡️ AI-Based Help Line Triage")
 st.caption("AI-assisted Hinglish helpline transcript triage · operator-support prototype")
 st.warning(
     "DEMO ONLY — use fictional transcripts. This version uses transparent keyword rules, "
@@ -613,7 +613,7 @@ if st.session_state.cases:
     st.download_button(
         "Download session history as CSV",
         data=csv_bytes,
-        file_name="sahaayak_session_history.csv",
+        file_name="helpline_triage_session_history.csv",
         mime="text/csv",
         help="Exports the current browser session, including fictional transcripts and review notes.",
     )
