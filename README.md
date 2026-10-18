@@ -10,9 +10,9 @@ Helpline calls may contain incomplete information, noisy transcripts, and a mixt
 
 ## Project Overview
 
-AI-Based Help Line Triage is an operator-support prototype that analyses a transcript and presents a structured review summary. The current version uses transparent, manually configured keyword rules for triage cues and TF-IDF text similarity to compare transcripts.
+AI-Based Help Line Triage is an operator-support prototype that analyses a transcript and presents a structured review summary. The current version (v2.1) combines a **trained ML triage classifier** (`models2.0/`) for the headline routing label with a **transparent, manually configured keyword-rule evidence layer** (`triage_rules.py`) and TF-IDF text similarity to compare transcripts.
 
-It is a decision-support demonstration—not a validated emergency-risk model. All results require human verification.
+It is a decision-support demonstration—not a validated emergency-risk model. All results require human verification. ML class scores are uncalibrated model outputs, not probabilities of real-world correctness.
 
 ## Current Features
 
@@ -51,9 +51,17 @@ python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
+Optional — retrain the model, regenerate honest metrics, and run the tests:
+
+```bash
+python models2.0/train_model.py            # retrain the ML artefact
+python models2.0/evaluate_model.py --save  # held-out metrics + confusion matrix
+python -m pytest -q                        # rule + inference tests
+```
+
 ## Known Limitations
 
-- Urgency triage is **rule-based**; there is no trained ML urgency classifier in this version.
+- Urgency routing uses a **trained ML classifier** (word+char TF-IDF → Logistic Regression) plus a transparent keyword-rule evidence layer. Scores are uncalibrated and trained on a small synthetic dataset, so they are not validated risk probabilities.
 - Phrase coverage is limited, so the rules can miss risks or flag harmless text. Negation and context handling are not comprehensive.
 - Location extraction detects only a limited set of configured patterns and does not verify caller location.
 - TF-IDF measures lexical similarity; it cannot establish that reports refer to the same person or incident.

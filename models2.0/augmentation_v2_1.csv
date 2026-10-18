@@ -1,0 +1,22 @@
+transcript,label,scenario_family,source_type,language_style,label_reason
+"A man is following me right now and getting closer, please send help quickly.",PRIORITY_REVIEW,AUG_follow_help_en_01,synthetic_contrastive_v2_1,English,Present-tense active pursuit plus explicit urgent help request.
+"Someone is chasing me and I cannot get away, I need help immediately.",PRIORITY_REVIEW,AUG_follow_help_en_02,synthetic_contrastive_v2_1,English,Active chase and immediate help request indicate possible current danger.
+"Please send help now, a stranger is right behind me and will not stop.",PRIORITY_REVIEW,AUG_follow_help_en_03,synthetic_contrastive_v2_1,English,Immediate pursuit plus urgent help request.
+"ek aadmi abhi mera peecha kar raha hai aur main darr gayi hoon, jaldi madad bhejo.",PRIORITY_REVIEW,AUG_follow_help_hi_01,synthetic_contrastive_v2_1,Roman-script Hinglish,Present-tense following with fear and an urgent help request.
+"koi mujhe follow kar raha hai aur paas aa raha hai, mujhe abhi help chahiye.",PRIORITY_REVIEW,AUG_follow_help_hi_02,synthetic_contrastive_v2_1,Roman-script Hinglish,Active approach plus immediate help request.
+"वह आदमी अभी मेरा पीछा कर रहा है और करीब आ रहा है, कृपया तुरंत मदद भेजिए।",PRIORITY_REVIEW,AUG_follow_help_dev_01,synthetic_contrastive_v2_1,Devanagari Hindi,Present-tense pursuit approaching caller with urgent help request.
+"He keeps following me down the street right now and I feel unsafe, please help me.",PRIORITY_REVIEW,AUG_follow_help_en_04,synthetic_contrastive_v2_1,English,Ongoing present pursuit plus unsafe feeling and help request.
+"mujhe abhi bachao, ek aadmi mujhe pakadne ki koshish kar raha hai.",PRIORITY_REVIEW,AUG_grab_help_hi_01,synthetic_contrastive_v2_1,Roman-script Hinglish,Attempted grabbing with immediate rescue request.
+"Please help, someone is trying to grab me at the bus stop right now.",PRIORITY_REVIEW,AUG_grab_help_en_01,synthetic_contrastive_v2_1,English,Attempted physical seizure happening now with help request.
+"मुझे अभी मदद चाहिए, एक आदमी मुझ पर हमला करने वाला है।",PRIORITY_REVIEW,AUG_attack_help_dev_01,synthetic_contrastive_v2_1,Devanagari Hindi,Imminent attack with immediate help request.
+"I am being followed by a stranger on the road and I am frightened, please help me.",PRIORITY_REVIEW,AUG_follow_help_en_05,synthetic_contrastive_v2_1,English,First-person present pursuit with fear and help request.
+"A man is following me as I walk and I do not feel safe, send someone to help.",PRIORITY_REVIEW,AUG_follow_help_en_06,synthetic_contrastive_v2_1,English,Ongoing present pursuit plus unsafe feeling and help request.
+"Main abhi follow ho rahi hoon ek aadmi se, please help bhejo.",PRIORITY_REVIEW,AUG_follow_help_hi_03,synthetic_contrastive_v2_1,Roman-script Hinglish,First-person present pursuit with urgent help request.
+"Someone is following me home right now, please help me before he reaches me.",PRIORITY_REVIEW,AUG_follow_help_en_07,synthetic_contrastive_v2_1,English,Present pursuit toward home with urgent help request.
+"I think a man is following me and I need help, he is still behind me.",PRIORITY_REVIEW,AUG_follow_help_en_08,synthetic_contrastive_v2_1,English,Ongoing present pursuit with current help request.
+"कोई मेरा पीछा कर रहा है और मैं डरी हुई हूँ, कृपया मदद भेजें।",PRIORITY_REVIEW,AUG_follow_help_dev_02,synthetic_contrastive_v2_1,Devanagari Hindi,Present pursuit with fear and help request.
+"Someone keeps following me on my way home each day; I am safe right now but want help reporting it.",SUPPORT_REVIEW,AUG_follow_safe_en_01,synthetic_contrastive_v2_1,English,Recurring following but currently safe and seeking reporting guidance.
+"A man followed me near the market last week; I am okay now but need guidance on what to do.",SUPPORT_REVIEW,AUG_follow_safe_en_02,synthetic_contrastive_v2_1,English,Past following resolved for now; wants guidance.
+"koi roz mera peecha karta hai, abhi main safe hoon par complaint karna chahti hoon.",SUPPORT_REVIEW,AUG_follow_safe_hi_01,synthetic_contrastive_v2_1,Roman-script Hinglish,Recurring following but currently safe; wants to file a complaint.
+"I feel unsafe because a neighbour keeps watching me, but nothing is happening at this moment; I want advice.",SUPPORT_REVIEW,AUG_unsafe_safe_en_01,synthetic_contrastive_v2_1,English,Ongoing unease without immediate danger; seeks advice.
+"He followed me a few times last month but has stopped; I want to know how to report it.",SUPPORT_REVIEW,AUG_follow_safe_en_03,synthetic_contrastive_v2_1,English,Past following that has stopped; reporting guidance.
