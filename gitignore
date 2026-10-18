@@ -1,0 +1,16 @@
+# Secrets must never be committed
+.streamlit/secrets.toml
+.env
+.env.*
+
+# Python/Colab
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Local virtual environments
+.venv/
+venv/
+
+# Local generated exports
+helpline_triage_session_history.csv

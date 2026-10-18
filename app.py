@@ -2,8 +2,9 @@
 
 Operator-support dashboard that pairs a trained ML triage classifier
 (``models2.0/``) with a transparent, rule-based evidence layer
-(``triage_rules.py``). The ML model gives the headline routing label with an
-uncalibrated model score; the keyword rules give human-readable evidence,
+(``triage_rules.py``). Transcripts can be typed or produced from a short audio
+clip via Sarvam AI speech-to-text. The ML model gives the headline routing label
+with an uncalibrated model score; the keyword rules give human-readable evidence,
 location clues, and information still to verify. They are kept separate so an
 operator can cross-check them.
 
@@ -13,6 +14,8 @@ emergency-risk model, and it must never dispatch services.
 from __future__ import annotations
 
 import importlib.util
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +26,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from triage_rules import analyze_transcript
+
+AUDIO_TYPES = ["wav", "mp3", "aac", "aiff", "ogg", "opus", "flac", "mp4", "m4a", "amr", "wma", "webm"]
 
 # -----------------------------------------------------------------------------
 # Page setup and design system — warm ivory / sage / muted teal / champagne
@@ -68,7 +73,6 @@ st.markdown(
       h2 { font-size: 1.28rem !important; }
       h5 { font-size: 1.02rem !important; margin-bottom: 0.2rem; }
 
-      /* Header band */
       .app-header {
         display: flex; align-items: center; gap: 0.85rem;
         background: linear-gradient(180deg, var(--cream) 0%, var(--cream-2) 100%);
@@ -80,13 +84,11 @@ st.markdown(
       .app-header .title { font-size: 1.32rem; font-weight: 700; color: var(--ink); line-height: 1.15; }
       .app-header .sub { font-size: 0.82rem; color: var(--muted); }
 
-      /* Elevated cards = st.container(border=True) */
       [data-testid="stVerticalBlockBorderWrapper"] {
         background: var(--cream); border: 1px solid var(--border) !important;
         border-radius: 0.9rem; box-shadow: var(--shadow);
         padding: 0.3rem 0.25rem;
       }
-      /* avoid double-card look for nested columns' inner wrappers */
       [data-testid="column"] [data-testid="stVerticalBlockBorderWrapper"] { box-shadow: var(--shadow-sm); }
 
       .eyebrow {
@@ -95,7 +97,6 @@ st.markdown(
       }
       .card-title { font-size: 1.05rem; font-weight: 700; color: var(--ink); margin: 0 0 0.3rem; }
 
-      /* Status badges */
       .triage-badge {
         display: inline-flex; align-items: center; gap: 0.45rem;
         padding: 0.42rem 0.9rem; border-radius: 0.65rem;
@@ -107,7 +108,6 @@ st.markdown(
       .b-unclear  { background: var(--unclear-bg);  color: var(--unclear);  border-color: var(--unclear); }
       .b-neutral  { background: var(--champagne); color: var(--ink); border-color: var(--border); }
 
-      /* Score bars */
       .score-row { margin: 0.4rem 0; }
       .score-label { font-size: 0.86rem; color: var(--ink); display: flex; justify-content: space-between; margin-bottom: 0.22rem; font-weight: 600; }
       .score-track { background: var(--champagne); border-radius: 7px; height: 0.55rem; overflow: hidden; }
@@ -116,7 +116,6 @@ st.markdown(
       .f-support  { background: linear-gradient(90deg, #c2a05a, var(--support)); }
       .f-unclear  { background: linear-gradient(90deg, #8aa79c, var(--unclear)); }
 
-      /* Chips */
       .chip {
         display: inline-block; background: var(--cream-2); color: var(--ink);
         border: 1px solid var(--border); border-radius: 0.55rem;
@@ -132,7 +131,6 @@ st.markdown(
         border-radius: 0.4rem; padding: 0.4rem 0.6rem; margin: 0.3rem 0; font-size: 0.9rem;
       }
 
-      /* Buttons */
       .stButton > button {
         border-radius: 0.6rem; font-weight: 600; border: 1px solid var(--border);
         background: var(--cream); color: var(--ink); transition: all 0.15s ease;
@@ -146,12 +144,10 @@ st.markdown(
       [data-testid="stDownloadButton"] > button { border-radius: 0.6rem; border: 1px solid var(--border); background: var(--cream); color: var(--ink); font-weight: 600; }
       [data-testid="stDownloadButton"] > button:hover { border-color: var(--teal); color: var(--teal-deep); }
 
-      /* Inputs */
       textarea, [data-baseweb="select"] > div, .stTextArea textarea {
         background: var(--cream) !important; border-radius: 0.6rem !important;
         border-color: var(--border) !important; color: var(--ink) !important;
       }
-      /* Dataframe + alerts soften */
       [data-testid="stDataFrame"] { border-radius: 0.7rem; overflow: hidden; border: 1px solid var(--border); }
       [data-testid="stNotification"], .stAlert { border-radius: 0.7rem; }
       hr { border-color: var(--border); }
@@ -173,16 +169,16 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.warning(
-    "**Demo only — use fictional transcripts.** The ML label and keyword rules are decision "
-    "support, not a validated urgency model; they can miss danger or flag harmless text. A "
-    "trained operator must verify the transcript and follow local protocol. This tool must "
+    "**Demo only — use fictional or appropriately authorised audio/text.** The ML label and keyword "
+    "rules are decision support, not a validated urgency model; they can miss danger or flag harmless "
+    "text. A trained operator must verify the transcript and follow local protocol. This tool must "
     "not independently dispatch emergency services.",
     icon="⚠️",
 )
 
 
 # -----------------------------------------------------------------------------
-# models2.0: trained ML triage classifier (loaded by file path)  [unchanged logic]
+# models2.0: trained ML triage classifier (loaded by file path)
 # -----------------------------------------------------------------------------
 _MODELS2_DIR = Path(__file__).resolve().parent / "models2.0"
 _TRIAGE_SPEC = importlib.util.spec_from_file_location(
@@ -229,7 +225,49 @@ def card_header(eyebrow: str, title: str) -> None:
 
 
 # -----------------------------------------------------------------------------
-# Sample data and case records  [unchanged logic]
+# Sarvam AI speech-to-text (optional audio input)
+# -----------------------------------------------------------------------------
+def get_sarvam_api_key() -> str | None:
+    """Streamlit Community Cloud secrets first; environment variable as fallback."""
+    try:
+        value = st.secrets.get("SARVAM_API_KEY", None)
+        if value:
+            return str(value).strip()
+    except Exception:
+        pass
+    value = os.environ.get("SARVAM_API_KEY")
+    return value.strip() if value else None
+
+
+def transcribe_audio(audio_bytes: bytes, filename: str, mode: str) -> tuple[str, str | None]:
+    """Transcribe a short audio clip with Sarvam Saaras v4."""
+    api_key = get_sarvam_api_key()
+    if not api_key:
+        raise RuntimeError("Sarvam API key is not configured. Add SARVAM_API_KEY to Streamlit Secrets or the environment.")
+
+    from sarvamai import SarvamAI  # lazy import so the app runs without the package
+
+    suffix = Path(filename).suffix or ".wav"
+    temp_path = None
+    client = SarvamAI(api_subscription_key=api_key)
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
+            temp_file.write(audio_bytes)
+            temp_path = temp_file.name
+        with open(temp_path, "rb") as audio_file:
+            response = client.speech_to_text.transcribe(file=audio_file, model="saaras:v4", mode=mode)
+        transcript = getattr(response, "transcript", None)
+        language_code = getattr(response, "language_code", None)
+        if not transcript or not str(transcript).strip():
+            raise RuntimeError("Sarvam returned an empty transcript. Try a clearer short clip.")
+        return str(transcript).strip(), language_code
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+# -----------------------------------------------------------------------------
+# Sample data and case records
 # -----------------------------------------------------------------------------
 SAMPLE_TRANSCRIPTS = {
     "Following near metro": "A man is following me near the metro station. He is threatening me and I am scared right now.",
@@ -281,13 +319,14 @@ def seed_cases() -> list[dict[str, Any]]:
 for key, default in [
     ("cases", None), ("last_analysis", None), ("last_prediction", None),
     ("last_transcript", ""), ("last_case_id", None), ("case_counter", 1),
+    ("last_detected_language", None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = seed_cases() if key == "cases" else default
 
 
 # -----------------------------------------------------------------------------
-# Related-complaint matching: lexical similarity with a justified threshold  [unchanged logic]
+# Related-complaint matching: lexical similarity with a justified threshold
 # -----------------------------------------------------------------------------
 RELATED_THRESHOLD = 0.30
 STRONG_THRESHOLD = 0.55
@@ -371,23 +410,27 @@ if ml_predict("status check") is not None:
     st.sidebar.success("ML triage model: loaded", icon="✅")
 else:
     st.sidebar.error("ML model unavailable — keyword rules only.", icon="⚠️")
+if get_sarvam_api_key():
+    st.sidebar.success("Sarvam API key: configured", icon="🎙️")
+else:
+    st.sidebar.info("Sarvam key not set — typed transcripts still work.", icon="🎙️")
 
 st.sidebar.markdown("**Pipeline (v2.1)**")
 st.sidebar.markdown(
     "- ML classifier · word+char TF-IDF → Logistic Regression (`models2.0`)\n"
     "- Transparent keyword evidence (`triage_rules`)\n"
+    "- Optional Sarvam AI speech-to-text\n"
     "- Location & missing-detail flags\n"
     "- Lexical similarity (thresholded)\n"
     "- Session-only case history"
 )
 st.sidebar.caption(
-    "Class scores are uncalibrated model outputs, not probabilities of real-world "
-    "correctness. No speech-to-text or BHASHINI API is connected."
+    "Class scores are uncalibrated model outputs, not probabilities of real-world correctness."
 )
 
 
 # -----------------------------------------------------------------------------
-# 1. Incoming complaint
+# 1. Incoming complaint (audio → Sarvam → transcript, or typed)
 # -----------------------------------------------------------------------------
 def clear_transcript() -> None:
     """Reset input + results. Runs as a callback (before the widget re-instantiates)."""
@@ -396,12 +439,69 @@ def clear_transcript() -> None:
     st.session_state.last_prediction = None
     st.session_state.last_transcript = ""
     st.session_state.last_case_id = None
+    st.session_state.last_detected_language = None
 
 
 with st.container(border=True):
     card_header("Step 1", "Incoming complaint")
+    st.markdown(
+        '<div class="muted">Upload a short audio clip (transcribed via Sarvam AI) or type a transcript directly.</div>',
+        unsafe_allow_html=True,
+    )
+    st.write("")
+
+    audio_col, mode_col = st.columns([2, 1])
+    with audio_col:
+        audio_file = st.file_uploader(
+            "Audio recording (short clips, ~30s, for synchronous transcription)",
+            type=AUDIO_TYPES,
+            help="Use a fictional or specifically authorised clip. Audio is sent to Sarvam AI only when you request transcription.",
+        )
+    with mode_col:
+        sarvam_mode = st.selectbox(
+            "Transcription style",
+            ["transcribe", "codemix", "translit"],
+            index=0,
+            help="Try transcribe first; compare codemix/translit on fictional Hinglish examples if needed.",
+        )
+
+    consent = st.checkbox(
+        "I confirm this is fictional or authorised audio and may be sent to Sarvam AI for transcription.",
+        key="audio_consent",
+    )
+
+    t_col, _ = st.columns([1.3, 2.4])
+    with t_col:
+        transcribe_clicked = st.button(
+            "🎙️ Transcribe with Sarvam",
+            use_container_width=True,
+            disabled=audio_file is None,
+        )
+
+    if transcribe_clicked:
+        if not consent:
+            st.error("Please confirm the audio is fictional or authorised before sending it to Sarvam.")
+        elif not get_sarvam_api_key():
+            st.error("Sarvam API key is missing. Configure SARVAM_API_KEY in Streamlit Secrets or the environment.")
+        elif audio_file is not None:
+            try:
+                with st.spinner("Transcribing audio with Sarvam…"):
+                    transcript_result, detected_language = transcribe_audio(
+                        audio_file.getvalue(), audio_file.name, sarvam_mode
+                    )
+                st.session_state.transcript_input = transcript_result
+                st.session_state.last_detected_language = detected_language
+                st.success("Transcription complete. Review and correct the text below before analysis.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Transcription failed: {type(exc).__name__}: {exc}")
+                st.info("You can still enter or paste a transcript manually below.")
+
+    if st.session_state.get("last_detected_language"):
+        st.caption(f"Sarvam detected language: {st.session_state.last_detected_language}")
+
     transcript = st.text_area(
-        "Call transcript",
+        "Call transcript — review before analysis",
         key="transcript_input",
         height=140,
         placeholder="Enter a fictional transcript in English, Hindi, or Romanized Hinglish…",
@@ -456,7 +556,6 @@ if st.session_state.last_analysis is not None:
     current_case = next((c for c in st.session_state.cases if c["case_id"] == case_id), None)
     review_status = current_case.get("review_status", "Pending review") if current_case else "Pending review"
 
-    # ---- Card: triage result + class scores ----
     with st.container(border=True):
         card_header("Step 2", f"Triage result · case {case_id}")
         st.markdown(
@@ -495,7 +594,6 @@ if st.session_state.last_analysis is not None:
             render_score_bars(prediction["class_scores"])
             st.caption(prediction.get("confidence_note", "Uncalibrated model score; not a probability of real-world correctness."))
 
-    # ---- Two cards: evidence | information to verify ----
     c1, c2 = st.columns(2)
     with c1:
         with st.container(border=True):
@@ -521,7 +619,6 @@ if st.session_state.last_analysis is not None:
             if prediction and "human_review_note" in prediction:
                 st.caption(prediction["human_review_note"])
 
-    # ---- Card: operator review ----
     with st.container(border=True):
         card_header("Step 3", "Operator review")
         st.markdown(
@@ -563,7 +660,6 @@ if st.session_state.last_analysis is not None:
                         break
                 st.success("Operator review saved to this browser session.")
 
-    # ---- Card: related transcripts ----
     with st.container(border=True):
         card_header("Step 4", "Related transcripts")
         matches, best = find_related_complaints(
@@ -620,6 +716,7 @@ with st.container(border=True):
                 st.session_state.last_prediction = None
                 st.session_state.last_transcript = ""
                 st.session_state.last_case_id = None
+                st.session_state.last_detected_language = None
                 st.session_state.case_counter = 1
                 st.rerun()
     else:
@@ -627,8 +724,8 @@ with st.container(border=True):
 
 st.caption(
     "Prototype v2.1 — trained ML triage (models2.0: word+char TF-IDF → Logistic Regression) with a "
-    "transparent keyword-rule evidence layer, basic location clues, thresholded lexical similarity, "
-    "and temporary session history. Scores are uncalibrated model outputs on synthetic data. "
-    "BHASHINI, speech-to-text, semantic embeddings, calibrated probabilities, and real-world "
-    "validation are future work."
+    "transparent keyword-rule evidence layer, optional Sarvam AI speech-to-text, basic location clues, "
+    "thresholded lexical similarity, and temporary session history. Scores are uncalibrated model "
+    "outputs on synthetic data. BHASHINI, semantic embeddings, calibrated probabilities, and "
+    "real-world validation are future work."
 )
