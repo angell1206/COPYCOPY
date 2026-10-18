@@ -1,0 +1,117 @@
+{
+  "selected_model": "Logistic Regression: words + characters C=3",
+  "selection_method": "grouped 5-fold CV on development data; prioritise priority recall among models within 0.02 macro F1 of best",
+  "cv_results": [
+    {
+      "model": "Logistic Regression: words + characters C=3",
+      "cv_accuracy": 0.9296296296296296,
+      "cv_macro_f1": 0.9291100776003374,
+      "priority_recall": 0.989010989010989,
+      "support_recall": 0.9,
+      "unclear_recall": 0.898876404494382
+    },
+    {
+      "model": "Linear SVM: words + characters C=0.3",
+      "cv_accuracy": 0.9259259259259259,
+      "cv_macro_f1": 0.9253709494016048,
+      "priority_recall": 0.989010989010989,
+      "support_recall": 0.8888888888888888,
+      "unclear_recall": 0.898876404494382
+    },
+    {
+      "model": "Linear SVM: characters C=10",
+      "cv_accuracy": 0.9222222222222223,
+      "cv_macro_f1": 0.9220332460607059,
+      "priority_recall": 0.967032967032967,
+      "support_recall": 0.9222222222222223,
+      "unclear_recall": 0.8764044943820225
+    },
+    {
+      "model": "Logistic Regression: words + characters C=1",
+      "cv_accuracy": 0.9222222222222223,
+      "cv_macro_f1": 0.9218346444087312,
+      "priority_recall": 0.978021978021978,
+      "support_recall": 0.9,
+      "unclear_recall": 0.8876404494382022
+    },
+    {
+      "model": "Linear SVM: characters C=1",
+      "cv_accuracy": 0.9185185185185185,
+      "cv_macro_f1": 0.9180874165394289,
+      "priority_recall": 0.978021978021978,
+      "support_recall": 0.9,
+      "unclear_recall": 0.8764044943820225
+    },
+    {
+      "model": "Linear SVM: words only C=10",
+      "cv_accuracy": 0.9037037037037037,
+      "cv_macro_f1": 0.9027916713744143,
+      "priority_recall": 0.989010989010989,
+      "support_recall": 0.8444444444444444,
+      "unclear_recall": 0.8764044943820225
+    }
+  ],
+  "fresh_eval_rows": 36,
+  "fresh_eval_accuracy": 0.9444444444444444,
+  "fresh_eval_macro_f1": 0.9440559440559442,
+  "fresh_eval_classification_report": {
+    "PRIORITY_REVIEW": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 12.0
+    },
+    "SUPPORT_REVIEW": {
+      "precision": 1.0,
+      "recall": 0.8333333333333334,
+      "f1-score": 0.9090909090909091,
+      "support": 12.0
+    },
+    "UNCLEAR_REVIEW": {
+      "precision": 0.8571428571428571,
+      "recall": 1.0,
+      "f1-score": 0.9230769230769231,
+      "support": 12.0
+    },
+    "accuracy": 0.9444444444444444,
+    "macro avg": {
+      "precision": 0.9523809523809524,
+      "recall": 0.9444444444444445,
+      "f1-score": 0.9440559440559442,
+      "support": 36.0
+    },
+    "weighted avg": {
+      "precision": 0.9523809523809523,
+      "recall": 0.9444444444444444,
+      "f1-score": 0.9440559440559441,
+      "support": 36.0
+    }
+  },
+  "fresh_eval_confusion_matrix": [
+    [
+      12,
+      0,
+      0
+    ],
+    [
+      0,
+      10,
+      2
+    ],
+    [
+      0,
+      0,
+      12
+    ]
+  ],
+  "labels_in_order": [
+    "PRIORITY_REVIEW",
+    "SUPPORT_REVIEW",
+    "UNCLEAR_REVIEW"
+  ],
+  "limitations": [
+    "All data are synthetic.",
+    "Small challenge set; not a real-world emergency-call benchmark.",
+    "If these fresh-set errors are used for tuning, the set is no longer an untouched evaluation set."
+  ]
+}

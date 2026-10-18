@@ -1,0 +1,3 @@
+call_id,scenario_group,scenario_family,transcript,actual_label,predicted_label
+FRESH-021,fresh_support_hindi_report,fresh_support_hindi_report,"मुझे पिछले महीने धमकी भरा संदेश मिला था। अभी कोई संपर्क नहीं कर रहा, लेकिन शिकायत कैसे दर्ज करूँ?",SUPPORT_REVIEW,UNCLEAR_REVIEW
+FRESH-023,fresh_support_hindi_property,fresh_support_hindi_property,कल मेरे पड़ोसी ने मेरी साइकिल तोड़ दी। अभी मैं सुरक्षित हूँ और रिपोर्ट करने का तरीका जानना चाहता हूँ।,SUPPORT_REVIEW,UNCLEAR_REVIEW
