@@ -71,12 +71,12 @@ def normalize_for_matching(text: str) -> str:
 def extract_details(transcript: str) -> dict[str, Any]:
     text = normalize_for_matching(transcript)
     evidence_patterns = [
-        (r"\b(?:has a weapon|weapon in (?:his|her) hand|gun pointed|knife out)\b|चाकू दिखा|बंदूक दिखा", "Possible weapon indicator"),
-        (r"\b(?:trying to kill me|threatened to kill me|attacking me|being attacked|stabbed me)\b|जान से मार|मुझ पर हमला", "Possible serious physical danger indicator"),
-        (r"\b(?:threatening me|threatening to|threats? against me)\b|धमकी दे रहा|धमकी दे रही|धमकी भरे संदेश", "Possible threat indicator"),
-        (r"\b(?:following me|stalking me|keeps following)\b|मेरा पीछा कर रहा|मेरा पीछा कर रही|पीछा कर रहा", "Possible following/stalking indicator"),
-        (r"\b(?:blackmail|doxxing|fake profile|unwanted messages)\b|ब्लैकमेल|फर्जी प्रोफाइल|निजी जानकारी", "Possible harassment/blackmail indicator"),
-        (r"\b(?:crash|accident|unconscious|heavy bleeding|overdose|swallowed tablets)\b|दुर्घटना|बेहोश|खून बह|गोलियां खा", "Possible medical/accident indicator"),
+        (r"\b(?:has a weapon|weapon in (?:his|her) hand|gun pointed|knife out|has a knife out|bandook dikha raha|bandook dikha rahi|chaku dikha raha|chaku dikha rahi)\b|चाकू दिखा|बंदूक दिखा|उसके हाथ में चाकू|हाथ में बंदूक", "Possible weapon indicator"),
+        (r"\b(?:trying to kill me|threatened to kill me|attacking me|being attacked|stabbed me|someone is attacking me)\b|जान से मार|मुझ पर हमला|मुझपर हमला|हमला हो रहा", "Possible serious physical danger indicator"),
+        (r"\b(?:threatening me|threatening to|threats? against me|dhamki de raha|dhamki de rahi|dhamki de raha hai|dhamki de rahi hai|mujhe dhamki de raha|mujhe dhamki de rahi|dhamki de raha hai)\b|धमकी दे रहा|धमकी दे रही|धमकी भरे संदेश|मुझे धमकी दे रहा|मुझे धमकी दे रही", "Possible threat indicator"),
+        (r"\b(?:following me|stalking me|keeps following|mera peecha kar raha|mera peecha kar rahi|mujhe follow kar raha|mujhe follow kar rahi|peecha kar raha|peecha kar rahi|mera peecha kar raha hai|mera peecha kar rahi hai)\b|मेरा पीछा कर रहा|मेरा पीछा कर रही|मेरा पीछा कर रहा है|मेरा पीछा कर रही है|पीछा कर रहा|पीछा कर रही", "Possible following/stalking indicator"),
+        (r"\b(?:blackmail|doxxing|fake profile|unwanted messages|baar baar dhamki|dhamki wale messages|threatening messages)\b|ब्लैकमेल|फर्जी प्रोफाइल|निजी जानकारी|धमकी भरे संदेश", "Possible harassment/blackmail indicator"),
+        (r"\b(?:crash|accident|unconscious|heavy bleeding|overdose|swallowed tablets)\b|दुर्घटना|बेहोश|खून बह|गोलियां खा|गोलियाँ खा", "Possible medical/accident indicator"),
     ]
     # Basic local negation guard: avoid flagging some phrases such as
     # "he is not following me" as an active indicator. This is not full
@@ -103,13 +103,13 @@ def extract_details(transcript: str) -> dict[str, Any]:
     ]
 
     location_patterns = [
-        (r"\b(?:near|at|outside|inside|by) (?:the )?metro station\b|मेट्रो स्टेशन के (?:पास|बाहर)", "metro station"),
-        (r"\b(?:near|at|outside|inside|by) (?:the )?bus stop\b|बस स्टॉप के (?:पास|बाहर)", "bus stop"),
-        (r"\b(?:near|at|outside|inside) (?:the )?college\b|कॉलेज के (?:पास|बाहर)", "college"),
-        (r"\b(?:at|near|outside) (?:my )?home\b|\bhome ke paas\b|घर (?:पर|के पास|के बाहर)", "home"),
-        (r"\b(?:near|at|outside) (?:the )?market\b|बाज़ार के पास|बाजार के पास|मार्केट में", "market"),
-        (r"\b(?:near|at|outside) (?:the )?hospital\b|अस्पताल के पास", "hospital"),
-        (r"\b(?:near|at|outside) (?:the )?hostel\b|हॉस्टल के पास|हॉस्टल में", "hostel"),
+        (r"\b(?:near|at|outside|inside|by) (?:the )?metro station\b|\bmetro station ke (?:paas|bahar)\b|मेट्रो स्टेशन के (?:पास|बाहर)", "metro station"),
+        (r"\b(?:near|at|outside|inside|by) (?:the )?bus stop\b|\bbus stop ke (?:paas|bahar)\b|बस स्टॉप के (?:पास|बाहर)", "bus stop"),
+        (r"\b(?:near|at|outside|inside) (?:the )?college\b|\bcollege ke (?:paas|bahar)\b|कॉलेज के (?:पास|बाहर)", "college"),
+        (r"\b(?:at|near|outside) (?:my )?home\b|\bhome ke paas\b|\bghar (?:par|pe|ke paas|ke bahar)\b|घर (?:पर|के पास|के बाहर)", "home"),
+        (r"\b(?:near|at|outside) (?:the )?market\b|\bmarket ke (?:paas|bahar)\b|बाज़ार के पास|बाजार के पास|मार्केट में", "market"),
+        (r"\b(?:near|at|outside) (?:the )?hospital\b|\bhospital ke (?:paas|bahar)\b|अस्पताल के पास", "hospital"),
+        (r"\b(?:near|at|outside) (?:the )?hostel\b|\bhostel ke (?:paas|bahar)\b|हॉस्टल के पास|हॉस्टल में", "hostel"),
     ]
     locations = [name for pattern, name in location_patterns if re.search(pattern, text)]
 
@@ -122,13 +122,82 @@ def extract_details(transcript: str) -> dict[str, Any]:
         missing.append("Whether the situation is happening right now is unclear.")
     if len(text.split()) < 7:
         missing.append("Transcript is short; additional context may be needed.")
-    if not re.search(r"\b(safe|unsafe|danger|help|scared|afraid|hurt|injured)\b|सुरक्षित|डर|मदद|घायल|खतरा", text):
+    if not re.search(r"\b(safe|unsafe|danger|help|scared|afraid|hurt|injured|darr|dar|darr lag|darr lag raha|bahut darr|mere paas aa raha|mere paas aa rahi|coming towards me|approaching me)\b|सुरक्षित|डर|मदद|घायल|खतरा", text):
         missing.append("Immediate safety status needs clarification.")
 
     return {
         "evidence": evidence,
         "location_clues": list(dict.fromkeys(locations)),
         "missing_information": missing,
+    }
+
+
+def assess_combined_safety_cues(transcript: str, details: dict[str, Any]) -> dict[str, Any]:
+    """Conservative cue-based escalation for human review, separate from ML.
+
+    This is not another trained model or an emergency decision. It escalates only
+    a specific combination of supported current-risk indicators for human review.
+    """
+    text = normalize_for_matching(transcript)
+
+    # Very small negation and historical guards. These are intentionally limited;
+    # context is complex, so the original transcript still needs human review.
+    negated_or_hypothetical = bool(re.search(
+        r"(?:\bnot\s+(?:following|stalking|threatening)|"
+        r"\bnever\s+(?:followed|threatened)|"
+        r"\bno one is (?:following|threatening)|"
+        r"\bused to (?:follow|threaten)|"
+        r"\bin the past\b|\byears ago\b|\blast week\b|"
+        r"\bfor my (?:essay|assignment|novel|story)\b|"
+        r"\bin a (?:movie|film|play|drama|scene)\b|"
+        r"\bwhat does .*\bmean\b|\bif somebody\b|\bhypothetically\b|"
+        r"नहीं .* पीछा|नहीं .* धमकी|पिछले सप्ताह|कुछ साल पहले)",
+        text,
+        flags=re.IGNORECASE,
+    ))
+
+    following = bool(re.search(
+        r"\b(following me|stalking me|keeps following|"
+        r"mera peecha kar raha(?: hai)?|mera peecha kar rahi(?: hai)?|"
+        r"mujhe follow kar raha(?: hai)?|mujhe follow kar rahi(?: hai)?|"
+        r"peecha kar raha(?: hai)?|peecha kar rahi(?: hai)?)\b|"
+        r"मेरा पीछा कर रहा|मेरा पीछा कर रही|पीछा कर रहा|पीछा कर रही",
+        text,
+        flags=re.IGNORECASE,
+    ))
+    threat = bool(re.search(
+        r"\b(threatening me|threatening to|threats? against me|"
+        r"dhamki de raha(?: hai)?|dhamki de rahi(?: hai)?|"
+        r"mujhe dhamki|dhamki wale messages)\b|"
+        r"धमकी दे रहा|धमकी दे रही|धमकी भरे संदेश|मुझे धमकी",
+        text,
+        flags=re.IGNORECASE,
+    ))
+    fear_or_approach = bool(re.search(
+        r"\b(scared|afraid|frightened|darr lag raha|darr lag rahi|"
+        r"mujhe darr|bahut darr|coming towards me|walking towards me|"
+        r"approaching me|comes closer|moving towards me|"
+        r"mere paas aa raha|mere paas aa rahi|mere kareeb aa raha|"
+        r"mere kareeb aa rahi|abhi)\b|डर लग रहा|मुझे डर|अभी",
+        text,
+        flags=re.IGNORECASE,
+    ))
+
+    # Escalate to prompt human review when multiple independently observable
+    # current-safety cues co-occur. This keeps the original ML prediction visible.
+    should_escalate = following and threat and fear_or_approach and not negated_or_hypothetical
+    reasons = []
+    if following:
+        reasons.append("possible following/stalking cue")
+    if threat:
+        reasons.append("possible threat cue")
+    if fear_or_approach:
+        reasons.append("fear, approach, or current-time cue")
+
+    return {
+        "rule_escalation": should_escalate,
+        "rule_escalation_reasons": reasons if should_escalate else [],
+        "review_recommendation": "PRIORITY_REVIEW" if should_escalate else None,
     }
 
 
@@ -196,7 +265,7 @@ def transcribe_audio(audio_bytes: bytes, filename: str, mode: str) -> tuple[str,
 # Page content
 # ---------------------------------------------------------------------------
 st.title("🛡️ AI-Based Help Line Triage")
-st.caption("Hinglish helpline transcript analysis · operator-support prototype")
+st.caption("Hinglish helpline transcript analysis · ML prediction plus separate safety-cue review")
 st.warning(
     "DEMO ONLY — use fictional or appropriately authorised audio/text. The classifier is trained on a small synthetic dataset and is not a validated emergency-risk model. It can make mistakes. A human operator must verify every result; the system must not dispatch services."
 )
@@ -310,12 +379,26 @@ if analyse_clicked:
             st.error(f"Unexpected label returned by model: {prediction}")
         else:
             details = extract_details(transcript)
-            queue, next_step = suggested_queue(prediction)
+            safety_check = assess_combined_safety_cues(transcript, details)
+            # Keep the model output transparent. A separate, conservative cue check
+            # can recommend priority human review without rewriting the ML prediction.
+            review_recommendation = safety_check["review_recommendation"] or prediction
+            queue, next_step = suggested_queue(review_recommendation)
+            if safety_check["rule_escalation"]:
+                next_step = (
+                    "Multiple configured safety cues were found. Promptly review the original transcript, "
+                    "verify current safety and location, and follow established organisational procedures. "
+                    "This rule flag is not proof of an emergency and does not dispatch services."
+                )
             case_id = f"HL-{len(st.session_state.cases) + 1:04d}"
             result = {
                 "case_id": case_id,
                 "transcript": transcript.strip(),
                 "label": prediction,
+                "model_label": prediction,
+                "review_recommendation": review_recommendation,
+                "rule_escalation": safety_check["rule_escalation"],
+                "rule_escalation_reasons": safety_check["rule_escalation_reasons"],
                 "queue": queue,
                 "next_step": next_step,
                 **details,
@@ -335,16 +418,23 @@ if result:
     st.caption(f"Case ID: {result['case_id']} · ML label + separate rule-based evidence extraction")
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("Predicted review label", result["label"])
-    m2.metric("Evidence indicators", len(result["evidence"]))
-    m3.metric("Location clues", len(result["location_clues"]))
+    m1.metric("ML model prediction", result.get("model_label", result["label"]))
+    m2.metric("Review recommendation", result.get("review_recommendation", result["label"]))
+    m3.metric("Evidence indicators", len(result["evidence"]))
 
-    if result["label"] == "PRIORITY_REVIEW":
-        st.warning("Priority review predicted — this is a prompt for human assessment, not an automatic emergency decision.")
-    elif result["label"] == "SUPPORT_REVIEW":
-        st.info("Support review predicted — confirm needs, timing, and context with a human operator.")
+    if result.get("rule_escalation"):
+        st.error(
+            "PRIORITY HUMAN REVIEW RECOMMENDED: multiple configured cues for possible following, "
+            "threat, and fear/approach were detected. The ML model's own prediction is shown separately. "
+            "Verify the original transcript and current safety; this rule flag does not dispatch services."
+        )
+        st.write("**Rule cues detected:**", ", ".join(result.get("rule_escalation_reasons", [])))
+    elif result.get("review_recommendation", result["label"]) == "PRIORITY_REVIEW":
+        st.warning("Priority review recommended — a prompt for human assessment, not an automatic emergency decision.")
+    elif result.get("review_recommendation", result["label"]) == "SUPPORT_REVIEW":
+        st.info("Support review recommended — confirm needs, timing, and context with a human operator.")
     else:
-        st.warning("Unclear review predicted — unclear does not mean safe. Follow up to establish context and immediate safety.")
+        st.warning("Unclear review — unclear does not mean safe. Follow up to establish context and immediate safety.")
 
     left, right = st.columns(2)
     with left:
@@ -393,7 +483,7 @@ st.header("3. Session case history")
 st.caption("This history is temporary and resets when the Streamlit session is lost. Do not use real caller data.")
 if st.session_state.cases:
     history = pd.DataFrame(st.session_state.cases)
-    display_cols = ["case_id", "label", "queue", "location_clues", "review_status", "created_at"]
+    display_cols = ["case_id", "model_label", "review_recommendation", "queue", "location_clues", "review_status", "created_at"]
     for col in display_cols:
         if col not in history.columns:
             history[col] = ""
