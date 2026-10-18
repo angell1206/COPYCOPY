@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -185,6 +186,7 @@ _TRIAGE_SPEC = importlib.util.spec_from_file_location(
     "triage_model_v2", _MODELS2_DIR / "triage_model.py"
 )
 triage_model_v2 = importlib.util.module_from_spec(_TRIAGE_SPEC)
+sys.modules[_TRIAGE_SPEC.name] = triage_model_v2  # so dataclasses/typing resolve the module
 try:
     _TRIAGE_SPEC.loader.exec_module(triage_model_v2)  # type: ignore[union-attr]
     _TRIAGE_IMPORT_ERROR: str | None = None
@@ -218,6 +220,82 @@ def ml_meta(label: str) -> dict[str, Any]:
     return ML_LABEL_META.get(
         label, {"title": label, "emoji": "•", "badge": "b-unclear", "fill": "f-unclear"}
     )
+
+
+# -----------------------------------------------------------------------------
+# Semantic Evidence Voting (SEV) — experimental alternative model
+# -----------------------------------------------------------------------------
+# NOTE (honest result): on the same untouched held-out split, the Logistic
+# Regression baseline scores macro F1 0.939 vs SEV 0.748 (see
+# models2.0/evaluation_semantic_vs_logreg.json). The multilingual encoder embeds
+# this heavily romanized-Hinglish corpus weakly. LogReg is the default; SEV is
+# offered for transparency and comparison, not as an improvement.
+METHOD_LOGREG = "Logistic Regression"
+METHOD_SEV = "Semantic Evidence Voting"
+
+_SEV_SPEC = importlib.util.spec_from_file_location(
+    "sev_v2", _MODELS2_DIR / "semantic_evidence_voting.py"
+)
+sev_module = importlib.util.module_from_spec(_SEV_SPEC)
+sys.modules[_SEV_SPEC.name] = sev_module  # required so @dataclass can resolve its module
+try:
+    _SEV_SPEC.loader.exec_module(sev_module)  # type: ignore[union-attr]
+    _SEV_IMPORT_ERROR: str | None = None
+except Exception as exc:  # pragma: no cover - defensive
+    _SEV_IMPORT_ERROR = str(exc)
+
+_SEV_INDEX_PATH = _MODELS2_DIR / "sev_index.npz"
+
+
+def sev_available() -> bool:
+    """True only if sentence-transformers is importable and the index exists."""
+    if _SEV_IMPORT_ERROR is not None or not _SEV_INDEX_PATH.exists():
+        return False
+    return importlib.util.find_spec("sentence_transformers") is not None
+
+
+@st.cache_resource(show_spinner="Loading Semantic Evidence Voting index…")
+def get_sev_voter():
+    return sev_module.SemanticEvidenceVoter.load(_SEV_INDEX_PATH)
+
+
+def predict_with_method(text: str, method: str) -> dict[str, Any] | None:
+    """Unified prediction dict for either model (keys are model-agnostic)."""
+    if method == METHOD_SEV:
+        try:
+            r = get_sev_voter().predict_one(text)
+            return {
+                "method": METHOD_SEV,
+                "predicted_label": r["predicted_label"],
+                "scores": r["vote_proportions"],
+                "confidence": r["confidence"],
+                "score_label": "vote proportion",
+                "score_note": (
+                    f"Vote proportions are the normalised share of similarity mass among the "
+                    f"top-{r['neighbours_used']} nearest training examples — not probabilities "
+                    f"of real-world correctness."
+                ),
+                "supporting_examples": r["supporting_examples"],
+                "description": triage_model_v2.LABEL_DESCRIPTIONS.get(r["predicted_label"], ""),
+                "human_review_note": "Verify the transcript, current danger, caller location, and appropriate response with a trained operator.",
+            }
+        except Exception:
+            return None
+    # Default: Logistic Regression baseline.
+    r = ml_predict(text)
+    if not r:
+        return None
+    return {
+        "method": METHOD_LOGREG,
+        "predicted_label": r["predicted_label"],
+        "scores": r["class_scores"],
+        "confidence": r["model_confidence"],
+        "score_label": "model score",
+        "score_note": r.get("confidence_note", "Uncalibrated model score; not a probability of real-world correctness."),
+        "supporting_examples": None,
+        "description": r.get("description", ""),
+        "human_review_note": r.get("human_review_note", ""),
+    }
 
 
 def card_header(eyebrow: str, title: str) -> None:
@@ -281,18 +359,20 @@ SAMPLE_TRANSCRIPTS = {
 }
 
 
-def make_case(case_id: str, transcript: str, created_at: str, source: str = "Analysed transcript") -> dict[str, Any]:
+def make_case(case_id: str, transcript: str, created_at: str, source: str = "Analysed transcript",
+              method: str = METHOD_LOGREG) -> dict[str, Any]:
     analysis = analyze_transcript(transcript)
-    prediction = ml_predict(transcript)
+    prediction = predict_with_method(transcript, method)
     if prediction and "predicted_label" in prediction:
         ml_label = prediction["predicted_label"]
-        ml_score = f"{prediction['model_confidence'] * 100:.0f}%"
+        ml_score = f"{prediction['confidence'] * 100:.0f}%"
     else:
         ml_label = "Model unavailable"
         ml_score = "—"
     return {
         "case_id": case_id,
         "transcript": transcript,
+        "model": method,
         "ml_label": ml_label,
         "ml_score": ml_score,
         "rule_cue": analysis["urgency"],
@@ -310,8 +390,11 @@ SEED_SAMPLE_KEYS = ["Following near metro", "Being followed — help", "Repeated
 
 
 def seed_cases() -> list[dict[str, Any]]:
+    # Seeds always use the fast Logistic Regression baseline so startup never
+    # depends on the heavy Sentence Transformer download.
     return [
-        make_case(f"DEMO-{i:03d}", SAMPLE_TRANSCRIPTS[key], "Fictional example", source="Built-in fictional example")
+        make_case(f"DEMO-{i:03d}", SAMPLE_TRANSCRIPTS[key], "Fictional example",
+                  source="Built-in fictional example", method=METHOD_LOGREG)
         for i, key in enumerate(SEED_SAMPLE_KEYS, start=1)
     ]
 
@@ -406,6 +489,27 @@ if st.session_state.get("_last_sample_choice") != sample_choice:
     st.session_state._last_sample_choice = sample_choice
 
 st.sidebar.divider()
+
+# Model selector: Logistic Regression (default) vs Semantic Evidence Voting.
+_sev_ok = sev_available()
+_method_options = [METHOD_LOGREG] + ([METHOD_SEV] if _sev_ok else [])
+triage_method = st.sidebar.radio(
+    "Triage model",
+    _method_options,
+    index=0,
+    help=(
+        "Logistic Regression (word+char TF-IDF) is the default and, on our untouched "
+        "held-out test, the stronger model. Semantic Evidence Voting is an experimental "
+        "multilingual-embedding method shown for transparency and comparison."
+    ),
+)
+if not _sev_ok:
+    st.sidebar.caption("Semantic Evidence Voting unavailable (needs sentence-transformers + built index).")
+st.sidebar.caption(
+    "Held-out macro F1 — LogReg 0.939 · SEV 0.748. LogReg is stronger on this "
+    "romanized-Hinglish corpus; SEV is not presented as an improvement."
+)
+
 if ml_predict("status check") is not None:
     st.sidebar.success("ML triage model: loaded", icon="✅")
 else:
@@ -418,6 +522,7 @@ else:
 st.sidebar.markdown("**Pipeline (v2.1)**")
 st.sidebar.markdown(
     "- ML classifier · word+char TF-IDF → Logistic Regression (`models2.0`)\n"
+    "- Experimental · Semantic Evidence Voting (multilingual embeddings)\n"
     "- Transparent keyword evidence (`triage_rules`)\n"
     "- Optional Sarvam AI speech-to-text\n"
     "- Location & missing-detail flags\n"
@@ -425,7 +530,8 @@ st.sidebar.markdown(
     "- Session-only case history"
 )
 st.sidebar.caption(
-    "Class scores are uncalibrated model outputs, not probabilities of real-world correctness."
+    "Class scores / vote proportions are uncalibrated model outputs, not probabilities "
+    "of real-world correctness."
 )
 
 
@@ -519,11 +625,14 @@ if analyze_clicked:
         st.warning("Enter a fictional transcript before analysing.")
     else:
         result = analyze_transcript(transcript)
-        prediction = ml_predict(transcript.strip())
+        with st.spinner(f"Analysing with {triage_method}…"):
+            prediction = predict_with_method(transcript.strip(), triage_method)
         case_id = f"HL-{st.session_state.case_counter:04d}"
         st.session_state.case_counter += 1
         created_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-        st.session_state.cases.append(make_case(case_id, transcript.strip(), created_at))
+        st.session_state.cases.append(
+            make_case(case_id, transcript.strip(), created_at, method=triage_method)
+        )
         st.session_state.last_analysis = result
         st.session_state.last_prediction = prediction
         st.session_state.last_transcript = transcript.strip()
@@ -556,10 +665,13 @@ if st.session_state.last_analysis is not None:
     current_case = next((c for c in st.session_state.cases if c["case_id"] == case_id), None)
     review_status = current_case.get("review_status", "Pending review") if current_case else "Pending review"
 
+    method_used = prediction.get("method", METHOD_LOGREG) if prediction else METHOD_LOGREG
+    score_label = prediction.get("score_label", "model score") if prediction else "model score"
     with st.container(border=True):
         card_header("Step 2", f"Triage result · case {case_id}")
         st.markdown(
-            '<div class="muted">ML routing label with rule-based evidence · uncalibrated model score, not a validated risk score</div>',
+            f'<div class="muted">Model: <b>{method_used}</b> · routing label with rule-based evidence · '
+            f'uncalibrated {score_label}, not a validated risk score</div>',
             unsafe_allow_html=True,
         )
         st.write("")
@@ -567,10 +679,10 @@ if st.session_state.last_analysis is not None:
         with head_l:
             if prediction and "predicted_label" in prediction:
                 meta = ml_meta(prediction["predicted_label"])
-                conf = prediction["model_confidence"] * 100
+                conf = prediction["confidence"] * 100
                 st.markdown(
                     f'<span class="triage-badge {meta["badge"]}">{meta["emoji"]} {meta["title"]}</span>'
-                    f'<span class="muted" style="margin-left:0.6rem;">model score {conf:.0f}%</span>',
+                    f'<span class="muted" style="margin-left:0.6rem;">{score_label} {conf:.0f}%</span>',
                     unsafe_allow_html=True,
                 )
                 st.markdown(f'<div class="muted" style="margin-top:0.45rem;">{prediction.get("description","")}</div>', unsafe_allow_html=True)
@@ -580,7 +692,7 @@ if st.session_state.last_analysis is not None:
                         f"'{meta['title']}'. Treat as priority and verify the transcript immediately."
                     )
             else:
-                st.error("ML model unavailable — showing keyword-rule evidence only.")
+                st.error("Selected model unavailable — showing keyword-rule evidence only.")
         with head_r:
             st.markdown(
                 '<div class="eyebrow">Operator review</div>'
@@ -588,11 +700,27 @@ if st.session_state.last_analysis is not None:
                 unsafe_allow_html=True,
             )
 
-        if prediction and "class_scores" in prediction:
+        if prediction and prediction.get("scores"):
             st.write("")
-            st.markdown('<div class="eyebrow">Model class scores (uncalibrated)</div>', unsafe_allow_html=True)
-            render_score_bars(prediction["class_scores"])
-            st.caption(prediction.get("confidence_note", "Uncalibrated model score; not a probability of real-world correctness."))
+            bars_label = "Vote proportions" if method_used == METHOD_SEV else "Model class scores (uncalibrated)"
+            st.markdown(f'<div class="eyebrow">{bars_label}</div>', unsafe_allow_html=True)
+            render_score_bars(prediction["scores"])
+            st.caption(prediction.get("score_note", "Uncalibrated output; not a probability of real-world correctness."))
+
+        # Semantic Evidence Voting: show the nearest training examples transparently.
+        if prediction and prediction.get("supporting_examples"):
+            st.write("")
+            st.markdown('<div class="eyebrow">Supporting training examples (nearest neighbours)</div>', unsafe_allow_html=True)
+            for ex in prediction["supporting_examples"]:
+                ex_meta = ml_meta(ex["label"])
+                snippet = ex["transcript"] if len(ex["transcript"]) <= 110 else ex["transcript"][:107] + "…"
+                st.markdown(
+                    f'<div class="kv"><span class="triage-badge {ex_meta["badge"]} badge-sm">{ex_meta["emoji"]} {ex_meta["title"]}</span>'
+                    f'<span class="muted" style="margin-left:0.5rem;">similarity {ex["similarity"]*100:.0f}%</span><br>'
+                    f'<span style="font-size:0.88rem;">“{snippet}”</span></div>',
+                    unsafe_allow_html=True,
+                )
+            st.caption("These are the labelled training transcripts most similar to this input. Similarity is not proof of a shared caller or incident; a human must verify.")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -689,11 +817,11 @@ with st.container(border=True):
     if st.session_state.cases:
         history = pd.DataFrame(st.session_state.cases)
         display_columns = [
-            "case_id", "ml_label", "ml_score", "rule_cue", "threat", "location",
+            "case_id", "model", "ml_label", "ml_score", "rule_cue", "threat", "location",
             "suggested_queue", "review_status", "created_at", "source",
         ]
         export_columns = [
-            "case_id", "transcript", "ml_label", "ml_score", "rule_cue", "threat", "location",
+            "case_id", "transcript", "model", "ml_label", "ml_score", "rule_cue", "threat", "location",
             "suggested_queue", "created_at", "review_status", "operator_notes", "source",
         ]
         for col in set(display_columns + export_columns):
