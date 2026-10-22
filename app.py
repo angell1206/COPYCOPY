@@ -1037,90 +1037,92 @@ def _format_metric(value: Any, metric: str) -> str:
     return f"{numeric:.3f}" if metric != "test_samples" else str(int(numeric))
 
 
-with st.container(border=True):
-    card_header("Model evaluation", "📊 Model performance & comparison")
-    st.markdown(
-        '<div class="muted">Held-out evaluation results for Logistic Regression, Semantic Evidence Voting, and Evidence Fusion. '
-        'These metrics describe the labelled evaluation dataset, not real-world emergency performance.</div>',
-        unsafe_allow_html=True,
-    )
-    metric_reports, metric_files, raw_metric_payloads = load_model_metrics()
-    if not metric_reports:
-        st.info(
-            "No readable model-comparison metrics were found. Add a saved evaluation report under "
-            "`models2.0/model_metrics.json` (format shown below) after running evaluation. "
-            "The dashboard intentionally does not display placeholder scores."
+with st.expander("📊 Model performance & comparison", expanded=False):
+    with st.container(border=True):
+        card_header("Model evaluation", "📊 Model performance & comparison")
+        st.markdown(
+            '<div class="muted">Held-out evaluation results for Logistic Regression, Semantic Evidence Voting, and Evidence Fusion. '
+            'These metrics describe the labelled evaluation dataset, not real-world emergency performance.</div>',
+            unsafe_allow_html=True,
         )
-        with st.expander("Expected evaluation JSON format"):
-            st.code(json.dumps({
-                "evaluation_split": "held-out test set",
-                "test_samples": None,
-                "models": {
-                    "Logistic Regression": {"accuracy": None, "macro_f1": None, "macro_precision": None, "macro_recall": None, "priority_recall": None},
-                    "Semantic Evidence Voting": {"accuracy": None, "macro_f1": None, "macro_precision": None, "macro_recall": None, "priority_recall": None},
-                    "Evidence Fusion": {"accuracy": None, "macro_f1": None, "macro_precision": None, "macro_recall": None, "priority_recall": None}
-                }
-            }, indent=2), language="json")
-            st.caption("Template only. Replace null values with metrics measured on the same held-out test set; never enter illustrative scores.")
-    else:
-        st.caption("Loaded evaluation file(s): " + ", ".join(metric_files))
-        display_names = [METHOD_LOGREG, METHOD_SEV, METHOD_FUSION]
-        metric_order = ["accuracy", "macro_f1", "macro_precision", "macro_recall", "priority_recall", "test_samples"]
-        display_labels = {
-            "accuracy": "Accuracy", "macro_f1": "Macro-F1", "macro_precision": "Macro precision",
-            "macro_recall": "Macro recall", "priority_recall": "Priority recall", "test_samples": "Test samples",
-        }
-        table_rows = []
-        for model_name in display_names:
-            metrics = metric_reports.get(model_name)
-            if not metrics:
-                continue
-            row = {"Model": model_name}
-            for metric in metric_order:
-                row[display_labels[metric]] = _format_metric(metrics.get(metric), metric)
-            table_rows.append(row)
-        if table_rows:
-            st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
-            f1_candidates = [(name, vals.get("macro_f1")) for name, vals in metric_reports.items() if vals.get("macro_f1") is not None]
-            priority_candidates = [(name, vals.get("priority_recall")) for name, vals in metric_reports.items() if vals.get("priority_recall") is not None]
-            insights = []
-            if f1_candidates:
-                best_f1 = max(f1_candidates, key=lambda item: item[1])
-                insights.append(f"Highest reported Macro-F1: **{best_f1[0]}** ({_format_metric(best_f1[1], 'macro_f1')}).")
-            if priority_candidates:
-                best_priority = max(priority_candidates, key=lambda item: item[1])
-                insights.append(f"Highest reported Priority Recall: **{best_priority[0]}** ({_format_metric(best_priority[1], 'priority_recall')}).")
-            if insights:
-                st.markdown("\n\n".join(insights))
-            if len(metric_reports) > 1:
-                st.caption("There is no single universally best model: consider Macro-F1, priority-class recall, and the cost of missed cases together. Highest metrics do not establish real-world safety.")
+        metric_reports, metric_files, raw_metric_payloads = load_model_metrics()
+        if not metric_reports:
+            st.info(
+                "No readable model-comparison metrics were found. Add a saved evaluation report under "
+                "`models2.0/model_metrics.json` (format shown below) after running evaluation. "
+                "The dashboard intentionally does not display placeholder scores."
+            )
+            with st.container():
+                st.markdown("**Expected evaluation JSON format**")
+                st.code(json.dumps({
+                    "evaluation_split": "held-out test set",
+                    "test_samples": None,
+                    "models": {
+                        "Logistic Regression": {"accuracy": None, "macro_f1": None, "macro_precision": None, "macro_recall": None, "priority_recall": None},
+                        "Semantic Evidence Voting": {"accuracy": None, "macro_f1": None, "macro_precision": None, "macro_recall": None, "priority_recall": None},
+                        "Evidence Fusion": {"accuracy": None, "macro_f1": None, "macro_precision": None, "macro_recall": None, "priority_recall": None}
+                    }
+                }, indent=2), language="json")
+                st.caption("Template only. Replace null values with metrics measured on the same held-out test set; never enter illustrative scores.")
         else:
-            st.warning("Evaluation JSON files were found, but their metric structure was not recognised. See raw reports below and adapt the evaluation output to the expected schema.")
-        with st.expander("Evaluation report details"):
-            for report in raw_metric_payloads:
-                st.markdown(f"**{report['file']}**")
-                st.json(report["payload"])
-        # Show a confusion matrix only when it is actually present in a report.
-        matrix_found = False
-        for model_name in display_names:
-            metrics = metric_reports.get(model_name, {})
-            cm = metrics.get("confusion_matrix")
-            if cm:
-                matrix_found = True
-                labels = metrics.get("labels") or ["Class 1", "Class 2", "Class 3"]
-                st.markdown(f"**{model_name} — confusion matrix**")
-                try:
-                    st.dataframe(pd.DataFrame(cm, index=labels, columns=labels), use_container_width=True)
-                except (ValueError, TypeError):
-                    st.write(cm)
-        if not matrix_found:
-            st.caption("Confusion matrices will appear here when included in the saved evaluation report.")
-    st.caption(
-        "For a fair comparison, evaluate all three methods on the same held-out test examples. "
-        "Tune fusion weights on validation data only; keep the test set out of semantic retrieval and tuning. "
-        "Scores shown here are evaluation metrics, not per-call confidence scores."
-    )
-
+            st.caption("Loaded evaluation file(s): " + ", ".join(metric_files))
+            display_names = [METHOD_LOGREG, METHOD_SEV, METHOD_FUSION]
+            metric_order = ["accuracy", "macro_f1", "macro_precision", "macro_recall", "priority_recall", "test_samples"]
+            display_labels = {
+                "accuracy": "Accuracy", "macro_f1": "Macro-F1", "macro_precision": "Macro precision",
+                "macro_recall": "Macro recall", "priority_recall": "Priority recall", "test_samples": "Test samples",
+            }
+            table_rows = []
+            for model_name in display_names:
+                metrics = metric_reports.get(model_name)
+                if not metrics:
+                    continue
+                row = {"Model": model_name}
+                for metric in metric_order:
+                    row[display_labels[metric]] = _format_metric(metrics.get(metric), metric)
+                table_rows.append(row)
+            if table_rows:
+                st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+                f1_candidates = [(name, vals.get("macro_f1")) for name, vals in metric_reports.items() if vals.get("macro_f1") is not None]
+                priority_candidates = [(name, vals.get("priority_recall")) for name, vals in metric_reports.items() if vals.get("priority_recall") is not None]
+                insights = []
+                if f1_candidates:
+                    best_f1 = max(f1_candidates, key=lambda item: item[1])
+                    insights.append(f"Highest reported Macro-F1: **{best_f1[0]}** ({_format_metric(best_f1[1], 'macro_f1')}).")
+                if priority_candidates:
+                    best_priority = max(priority_candidates, key=lambda item: item[1])
+                    insights.append(f"Highest reported Priority Recall: **{best_priority[0]}** ({_format_metric(best_priority[1], 'priority_recall')}).")
+                if insights:
+                    st.markdown("\n\n".join(insights))
+                if len(metric_reports) > 1:
+                    st.caption("There is no single universally best model: consider Macro-F1, priority-class recall, and the cost of missed cases together. Highest metrics do not establish real-world safety.")
+            else:
+                st.warning("Evaluation JSON files were found, but their metric structure was not recognised. See raw reports below and adapt the evaluation output to the expected schema.")
+            with st.container():
+                st.markdown("**Evaluation report details**")
+                for report in raw_metric_payloads:
+                    st.markdown(f"**{report['file']}**")
+                    st.json(report["payload"])
+            # Show a confusion matrix only when it is actually present in a report.
+            matrix_found = False
+            for model_name in display_names:
+                metrics = metric_reports.get(model_name, {})
+                cm = metrics.get("confusion_matrix")
+                if cm:
+                    matrix_found = True
+                    labels = metrics.get("labels") or ["Class 1", "Class 2", "Class 3"]
+                    st.markdown(f"**{model_name} — confusion matrix**")
+                    try:
+                        st.dataframe(pd.DataFrame(cm, index=labels, columns=labels), use_container_width=True)
+                    except (ValueError, TypeError):
+                        st.write(cm)
+            if not matrix_found:
+                st.caption("Confusion matrices will appear here when included in the saved evaluation report.")
+        st.caption(
+            "For a fair comparison, evaluate all three methods on the same held-out test examples. "
+            "Tune fusion weights on validation data only; keep the test set out of semantic retrieval and tuning. "
+            "Scores shown here are evaluation metrics, not per-call confidence scores."
+        )
 
 # -----------------------------------------------------------------------------
 # 5. Emergency assistance — nearby resources + conservative safety cues
