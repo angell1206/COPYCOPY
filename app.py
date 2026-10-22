@@ -18,6 +18,8 @@ import json
 import os
 import sys
 import tempfile
+import math
+import requests
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -1124,10 +1126,192 @@ with st.container(border=True):
 
 
 # -----------------------------------------------------------------------------
-# 5. Session case history
+# 5. Emergency assistance — nearby resources + conservative safety cues
+# -----------------------------------------------------------------------------
+@st.cache_data(ttl=900, show_spinner=False)
+def _geocode_place(query: str) -> dict[str, Any] | None:
+    """Resolve an operator-entered place using OpenStreetMap Nominatim."""
+    response = requests.get(
+        "https://nominatim.openstreetmap.org/search",
+        params={"q": query, "format": "jsonv2", "limit": 1},
+        headers={"User-Agent": "HelplineTriageDemo/1.0 (emergency-resource lookup)"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    rows = response.json()
+    if not rows:
+        return None
+    return {"lat": float(rows[0]["lat"]), "lon": float(rows[0]["lon"]), "display_name": rows[0].get("display_name", query)}
+
+
+def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two points in kilometres."""
+    radius = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * radius * math.asin(min(1.0, math.sqrt(a)))
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _nearby_emergency_resources(lat: float, lon: float, radius_m: int) -> list[dict[str, Any]]:
+    """Query OpenStreetMap via Overpass; results are map listings, not availability."""
+    query = f"""[out:json][timeout:25];(
+      node["amenity"="police"](around:{radius_m},{lat},{lon});
+      way["amenity"="police"](around:{radius_m},{lat},{lon});
+      relation["amenity"="police"](around:{radius_m},{lat},{lon});
+      node["amenity"="hospital"](around:{radius_m},{lat},{lon});
+      way["amenity"="hospital"](around:{radius_m},{lat},{lon});
+      relation["amenity"="hospital"](around:{radius_m},{lat},{lon});
+      node["amenity"="clinic"](around:{radius_m},{lat},{lon});
+      way["amenity"="clinic"](around:{radius_m},{lat},{lon});
+      relation["amenity"="clinic"](around:{radius_m},{lat},{lon});
+      node["emergency"="ambulance_station"](around:{radius_m},{lat},{lon});
+      way["emergency"="ambulance_station"](around:{radius_m},{lat},{lon});
+      relation["emergency"="ambulance_station"](around:{radius_m},{lat},{lon});
+    );out center tags;"""
+    response = requests.post(
+        "https://overpass-api.de/api/interpreter", data={"data": query},
+        headers={"User-Agent": "HelplineTriageDemo/1.0"}, timeout=35,
+    )
+    response.raise_for_status()
+    elements = response.json().get("elements", [])
+    results: list[dict[str, Any]] = []
+    seen = set()
+    for el in elements:
+        tags = el.get("tags", {})
+        if "lat" in el and "lon" in el:
+            rlat, rlon = float(el["lat"]), float(el["lon"])
+        elif el.get("center"):
+            rlat, rlon = float(el["center"]["lat"]), float(el["center"]["lon"])
+        else:
+            continue
+        amenity = tags.get("amenity", "")
+        emergency = tags.get("emergency", "")
+        if amenity == "police":
+            kind = "Police station"
+        elif amenity == "hospital":
+            kind = "Hospital"
+        elif amenity == "clinic":
+            kind = "Clinic"
+        elif emergency == "ambulance_station":
+            kind = "Ambulance station"
+        else:
+            continue
+        name = tags.get("name") or tags.get("operator") or kind
+        dedupe = (kind, name.lower(), round(rlat, 4), round(rlon, 4))
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+        results.append({
+            "Resource": name, "Type": kind,
+            "Distance (km)": round(_distance_km(lat, lon, rlat, rlon), 2),
+            "Address": tags.get("addr:full") or ", ".join(x for x in [tags.get("addr:street"), tags.get("addr:city")] if x) or "Address not listed",
+            "lat": rlat, "lon": rlon,
+            "Phone": tags.get("phone") or tags.get("contact:phone") or "Not listed",
+            "Website": tags.get("website") or tags.get("contact:website") or "",
+        })
+    return sorted(results, key=lambda row: row["Distance (km)"])
+
+
+with st.container(border=True):
+    card_header("Step 5", "🚨 Emergency assistance & nearby resources")
+    st.markdown(
+        '<div class="muted">Find mapped police stations, hospitals, clinics and ambulance stations near an operator-entered location.</div>',
+        unsafe_allow_html=True,
+    )
+    st.warning(
+        "Demo resource finder, not an emergency dispatch service. OpenStreetMap listings may be missing, outdated or incomplete; "
+        "a listed ambulance station does not confirm that an ambulance is available. In an active emergency, follow local emergency protocol immediately.",
+        icon="⚠️",
+    )
+    loc_col, radius_col = st.columns([3, 1])
+    with loc_col:
+        emergency_location = st.text_input(
+            "Caller location (enter a nearby landmark, address or locality)",
+            placeholder="e.g., Connaught Place, New Delhi",
+            key="emergency_location_query",
+            help="Location is sent to OpenStreetMap only when you press Search. Use fictional/demo locations unless you have authorization.",
+        )
+    with radius_col:
+        radius_km = st.selectbox("Search radius", [2, 5, 10, 20], index=1, format_func=lambda x: f"{x} km", key="emergency_radius_km")
+    search_resources = st.button("📍 Find nearby emergency resources", type="primary", use_container_width=True)
+    if search_resources:
+        if not emergency_location.strip():
+            st.error("Enter a location or landmark first.")
+        else:
+            try:
+                with st.spinner("Resolving location and searching mapped emergency resources…"):
+                    geocoded = _geocode_place(emergency_location.strip())
+                    if not geocoded:
+                        st.session_state.emergency_lookup_result = {"error": "Location not found. Try a more specific address or landmark."}
+                    else:
+                        places = _nearby_emergency_resources(geocoded["lat"], geocoded["lon"], int(radius_km * 1000))
+                        st.session_state.emergency_lookup_result = {"location": geocoded, "places": places, "radius_km": radius_km}
+            except requests.RequestException as exc:
+                st.session_state.emergency_lookup_result = {"error": f"The map service could not be reached ({type(exc).__name__}). Please retry later or use an official local directory."}
+            except (ValueError, KeyError) as exc:
+                st.session_state.emergency_lookup_result = {"error": f"Could not process the map response ({type(exc).__name__}). Please retry later."}
+    lookup = st.session_state.get("emergency_lookup_result")
+    if lookup:
+        if lookup.get("error"):
+            st.error(lookup["error"])
+        else:
+            resolved = lookup["location"]
+            places = lookup["places"]
+            st.caption(f"Resolved location: {resolved['display_name']} · Search radius: {lookup['radius_km']} km")
+            if not places:
+                st.info("No matching resources were found in the mapped data within this radius. This does not mean no services exist; verify using official local sources.")
+            else:
+                resource_df = pd.DataFrame(places)
+                type_counts = resource_df["Type"].value_counts().to_dict()
+                count_cols = st.columns(4)
+                for idx, label in enumerate(["Police station", "Hospital", "Clinic", "Ambulance station"]):
+                    count_cols[idx].metric(label, int(type_counts.get(label, 0)))
+                map_df = pd.DataFrame([{"lat": resolved["lat"], "lon": resolved["lon"], "Map point": "Entered location"}] + [
+                    {"lat": item["lat"], "lon": item["lon"], "Map point": item["Resource"]} for item in places
+                ])
+                st.map(map_df, latitude="lat", longitude="lon", size=90, color=None, use_container_width=True)
+                display_df = resource_df[["Resource", "Type", "Distance (km)", "Address", "Phone"]].copy()
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                st.markdown("**Directions and contact links**")
+                for item in places[:12]:
+                    directions_url = f"https://www.google.com/maps/dir/?api=1&destination={item['lat']},{item['lon']}"
+                    maps_url = f"https://www.openstreetmap.org/?mlat={item['lat']}&mlon={item['lon']}#map=17/{item['lat']}/{item['lon']}"
+                    phone_text = f" · Phone: {item['Phone']}" if item["Phone"] != "Not listed" else " · Phone not listed"
+                    st.markdown(
+                        f"- **{item['Resource']}** — {item['Type']}, {item['Distance (km)']} km{phone_text} · "
+                        f"[Directions](<{directions_url}>) · [OpenStreetMap](<{maps_url}>)"
+                    )
+                st.caption("Data source: OpenStreetMap contributors via Nominatim and Overpass. Distances are straight-line estimates, not travel times. Confirm the facility and phone number independently before relying on them.")
+
+    # Simple, transparent safety cues from the latest transcript; not a risk classifier.
+    latest_transcript = str(st.session_state.get("last_transcript") or st.session_state.get("transcript_input") or "").strip()
+    if latest_transcript:
+        text_lower = latest_transcript.lower()
+        safety_cues = {
+            "Possible immediate threat / violence": ["he is here", "he's here", "attacking me", "trying to kill", "has a weapon", "gun", "knife", "following me right now", "help me now", "being attacked", "mujhe maar", "maar raha", "ghar mein ghus", "peecha kar raha"],
+            "Possible serious medical emergency": ["not breathing", "can't breathe", "cannot breathe", "unconscious", "not responding", "severe bleeding", "heavy bleeding", "chest pain", "collapsed", "saans nahi", "behosh", "khoon beh", "saans nahin aa"],
+        }
+        matched_cues = [(category, [phrase for phrase in phrases if phrase in text_lower]) for category, phrases in safety_cues.items()]
+        matched_cues = [(category, phrases) for category, phrases in matched_cues if phrases]
+        st.markdown("**Transcript safety-check cues (experimental)**")
+        if matched_cues:
+            for category, phrases in matched_cues:
+                st.error(f"Review promptly: {category}. Matched phrase(s): {', '.join(phrases)}")
+            st.caption("Keyword checks can miss emergencies and can flag harmless or quoted text. A trained operator must verify context and follow local protocol.")
+        else:
+            st.info("No configured safety phrase matched the latest transcript. This is not evidence that the situation is safe.")
+    else:
+        st.caption("Analyse a fictional/authorized transcript above to run the experimental transcript safety checks.")
+
+
+# -----------------------------------------------------------------------------
+# 6. Session case history
 # -----------------------------------------------------------------------------
 with st.container(border=True):
-    card_header("Step 5", "Session case history")
+    card_header("Step 6", "Session case history")
     st.markdown('<div class="muted">Kept in Streamlit session state only — not a permanent database.</div>', unsafe_allow_html=True)
     st.write("")
     if st.session_state.cases:
@@ -1167,8 +1351,8 @@ with st.container(border=True):
         st.info("No cases recorded in this session yet.")
 
 st.caption(
-    "Prototype v2.2 — Logistic Regression, optional Semantic Evidence Voting and Evidence Fusion, "
-    "transparent keyword-rule evidence, optional Sarvam AI speech-to-text, location clues, and temporary "
+    "Prototype v2.3 — Logistic Regression, optional Semantic Evidence Voting and Evidence Fusion, "
+    "transparent keyword-rule evidence, optional Sarvam AI speech-to-text, emergency-resource lookup, location clues, and temporary "
     "session history. This is a decision-support prototype using synthetic/demo data; model scores are "
     "not validated real-world risk probabilities and must be reviewed by a trained human."
 )
