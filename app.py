@@ -172,12 +172,9 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-st.warning(
-    "**Demo only — use fictional or appropriately authorised audio/text.** The ML label and keyword "
-    "rules are decision support, not a validated urgency model; they can miss danger or flag harmless "
-    "text. A trained operator must verify the transcript and follow local protocol. This tool must "
-    "not independently dispatch emergency services.",
-    icon="⚠️",
+st.caption(
+    "Operator decision support: verify transcript details and follow local emergency protocols. "
+    "Model outputs may be incorrect and must not independently trigger emergency dispatch."
 )
 
 
@@ -543,7 +540,7 @@ def find_related_complaints(
 # Sidebar
 # -----------------------------------------------------------------------------
 st.sidebar.markdown("### 🛡️ Operator Console")
-st.sidebar.caption("Fictional examples only.")
+st.sidebar.caption("Select an example or enter a transcript for analysis.")
 
 sample_choice = st.sidebar.selectbox(
     "Load an example transcript",
@@ -632,18 +629,18 @@ with st.container(border=True):
         audio_file = st.file_uploader(
             "Audio recording (short clips, ~30s, for synchronous transcription)",
             type=AUDIO_TYPES,
-            help="Use a fictional or specifically authorised clip. Audio is sent to Sarvam AI only when you request transcription.",
+            help="Use audio you are authorised to process. Audio is sent to Sarvam AI only when you request transcription.",
         )
     with mode_col:
         sarvam_mode = st.selectbox(
             "Transcription style",
             ["transcribe", "codemix", "translit"],
             index=0,
-            help="Try transcribe first; compare codemix/translit on fictional Hinglish examples if needed.",
+            help="Choose the transcription style that best matches the recording language.",
         )
 
     consent = st.checkbox(
-        "I confirm this is fictional or authorised audio and may be sent to Sarvam AI for transcription.",
+        "I confirm I am authorised to process this audio and send it to Sarvam AI for transcription.",
         key="audio_consent",
     )
 
@@ -657,7 +654,7 @@ with st.container(border=True):
 
     if transcribe_clicked:
         if not consent:
-            st.error("Please confirm the audio is fictional or authorised before sending it to Sarvam.")
+            st.error("Please confirm you are authorised to process and send this audio to Sarvam before transcription.")
         elif not get_sarvam_api_key():
             st.error("Sarvam API key is missing. Configure SARVAM_API_KEY in Streamlit Secrets or the environment.")
         elif audio_file is not None:
@@ -681,7 +678,7 @@ with st.container(border=True):
         "Call transcript — review before analysis",
         key="transcript_input",
         height=140,
-        placeholder="Enter a fictional transcript in English, Hindi, or Romanized Hinglish…",
+        placeholder="Enter a transcript in English, Hindi, or Romanized Hinglish…",
         help="Original text is kept for operator review. ML classifies routing; keyword rules add transparent evidence.",
         label_visibility="collapsed",
     )
@@ -693,7 +690,7 @@ with st.container(border=True):
 
 if analyze_clicked:
     if not transcript.strip():
-        st.warning("Enter a fictional transcript before analysing.")
+        st.warning("Enter a transcript before analysing.")
     else:
         result = analyze_transcript(transcript)
         with st.spinner(f"Analysing with {triage_method}…"):
@@ -869,7 +866,7 @@ if st.session_state.last_analysis is not None:
                 )
             with rc2:
                 notes = st.text_area(
-                    "Operator notes (fictional demo only)",
+                    "Operator notes",
                     key=notes_key,
                     placeholder="Record what was verified, without adding real personal data.",
                     height=90,
@@ -1221,10 +1218,9 @@ with st.container(border=True):
         '<div class="muted">Find mapped police stations, hospitals, clinics and ambulance stations near an operator-entered location.</div>',
         unsafe_allow_html=True,
     )
-    st.warning(
-        "Demo resource finder, not an emergency dispatch service. OpenStreetMap listings may be missing, outdated or incomplete; "
-        "a listed ambulance station does not confirm that an ambulance is available. In an active emergency, follow local emergency protocol immediately.",
-        icon="⚠️",
+    st.info(
+        "Resource listings can be incomplete or outdated, and a listed ambulance station does not confirm vehicle availability. "
+        "For an active emergency, follow local emergency protocol immediately; this tool does not dispatch services."
     )
     loc_col, radius_col = st.columns([3, 1])
     with loc_col:
@@ -1232,7 +1228,7 @@ with st.container(border=True):
             "Caller location (enter a nearby landmark, address or locality)",
             placeholder="e.g., Connaught Place, New Delhi",
             key="emergency_location_query",
-            help="Location is sent to OpenStreetMap only when you press Search. Use fictional/demo locations unless you have authorization.",
+            help="The location query is sent to OpenStreetMap only when you press Search. Enter a location you are authorised to use.",
         )
     with radius_col:
         radius_km = st.selectbox("Search radius", [2, 5, 10, 20], index=1, format_func=lambda x: f"{x} km", key="emergency_radius_km")
@@ -1351,8 +1347,7 @@ with st.container(border=True):
         st.info("No cases recorded in this session yet.")
 
 st.caption(
-    "Prototype v2.3 — Logistic Regression, optional Semantic Evidence Voting and Evidence Fusion, "
+    "Helpline Triage — Logistic Regression, optional Semantic Evidence Voting and Evidence Fusion, "
     "transparent keyword-rule evidence, optional Sarvam AI speech-to-text, emergency-resource lookup, location clues, and temporary "
-    "session history. This is a decision-support prototype using synthetic/demo data; model scores are "
-    "not validated real-world risk probabilities and must be reviewed by a trained human."
+    "session history. Model scores are not validated real-world risk probabilities and require trained human review."
 )
