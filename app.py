@@ -1052,18 +1052,10 @@ with st.expander("📊 Model performance & comparison", expanded=False):
                 "`models2.0/model_metrics.json` (format shown below) after running evaluation. "
                 "The dashboard intentionally does not display placeholder scores."
             )
-            with st.container():
-                st.markdown("**Expected evaluation JSON format**")
-                st.code(json.dumps({
-                    "evaluation_split": "held-out test set",
-                    "test_samples": None,
-                    "models": {
-                        "Logistic Regression": {"accuracy": None, "macro_f1": None, "macro_precision": None, "macro_recall": None, "priority_recall": None},
-                        "Semantic Evidence Voting": {"accuracy": None, "macro_f1": None, "macro_precision": None, "macro_recall": None, "priority_recall": None},
-                        "Evidence Fusion": {"accuracy": None, "macro_f1": None, "macro_precision": None, "macro_recall": None, "priority_recall": None}
-                    }
-                }, indent=2), language="json")
-                st.caption("Template only. Replace null values with metrics measured on the same held-out test set; never enter illustrative scores.")
+            st.caption(
+                "To populate this panel, save measured evaluation metrics in "
+                "models2.0/model_metrics.json. No placeholder scores are shown."
+            )
         else:
             st.caption("Loaded evaluation file(s): " + ", ".join(metric_files))
             display_names = [METHOD_LOGREG, METHOD_SEV, METHOD_FUSION]
@@ -1098,11 +1090,8 @@ with st.expander("📊 Model performance & comparison", expanded=False):
                     st.caption("There is no single universally best model: consider Macro-F1, priority-class recall, and the cost of missed cases together. Highest metrics do not establish real-world safety.")
             else:
                 st.warning("Evaluation JSON files were found, but their metric structure was not recognised. See raw reports below and adapt the evaluation output to the expected schema.")
-            with st.container():
-                st.markdown("**Evaluation report details**")
-                for report in raw_metric_payloads:
-                    st.markdown(f"**{report['file']}**")
-                    st.json(report["payload"])
+            # Raw evaluation JSON is intentionally kept out of the user-facing dashboard.
+            # Only parsed metrics and available confusion matrices are displayed.
             # Show a confusion matrix only when it is actually present in a report.
             matrix_found = False
             for model_name in display_names:
