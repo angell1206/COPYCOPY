@@ -154,6 +154,14 @@ class SemanticEvidenceVoter:
         sims_all = Q @ self._emb.T  # (n_query, n_train)
         return [self._vote_from_similarities(sims_all[i])["predicted_label"] for i in range(Q.shape[0])]
 
+    def predict_details(self, transcripts: list[str], top_n_evidence: int = 5) -> list[dict[str, Any]]:
+        """Batch prediction returning the full vote dict per query (for fusion)."""
+        if self._emb is None:
+            raise RuntimeError("Voter is not fitted.")
+        Q = embed([str(t) for t in transcripts], self.model_name)
+        sims_all = Q @ self._emb.T
+        return [self._vote_from_similarities(sims_all[i], top_n_evidence=top_n_evidence) for i in range(Q.shape[0])]
+
     def predict_loo(self) -> list[str]:
         """Leave-one-out prediction over the training index (self excluded).
 

@@ -232,6 +232,7 @@ def ml_meta(label: str) -> dict[str, Any]:
 # offered for transparency and comparison, not as an improvement.
 METHOD_LOGREG = "Logistic Regression"
 METHOD_SEV = "Semantic Evidence Voting"
+METHOD_FUSION = "Evidence Fusion"
 
 _SEV_SPEC = importlib.util.spec_from_file_location(
     "sev_v2", _MODELS2_DIR / "semantic_evidence_voting.py"
@@ -246,12 +247,45 @@ except Exception as exc:  # pragma: no cover - defensive
 
 _SEV_INDEX_PATH = _MODELS2_DIR / "sev_index.npz"
 
+# Evidence Fusion module + its validation-tuned config.
+_FUSION_SPEC = importlib.util.spec_from_file_location(
+    "evidence_fusion_v2", _MODELS2_DIR / "evidence_fusion.py"
+)
+fusion_module = importlib.util.module_from_spec(_FUSION_SPEC)
+sys.modules[_FUSION_SPEC.name] = fusion_module  # required so @dataclass can resolve its module
+try:
+    _FUSION_SPEC.loader.exec_module(fusion_module)  # type: ignore[union-attr]
+    _FUSION_IMPORT_ERROR: str | None = None
+except Exception as exc:  # pragma: no cover - defensive
+    _FUSION_IMPORT_ERROR = str(exc)
+
+_FUSION_CONFIG_PATH = _MODELS2_DIR / "fusion_config.json"
+
+
+def get_fusion_config():
+    """Load the validation-tuned fusion config (weight + review thresholds)."""
+    cfg = fusion_module.FusionConfig()
+    try:
+        import json
+        data = json.loads(_FUSION_CONFIG_PATH.read_text())
+        cfg.weight = float(data.get("weight", cfg.weight))
+        cfg.low_confidence = float(data.get("low_confidence", cfg.low_confidence))
+        cfg.low_margin = float(data.get("low_margin", cfg.low_margin))
+    except Exception:
+        pass
+    return cfg
+
 
 def sev_available() -> bool:
     """True only if sentence-transformers is importable and the index exists."""
     if _SEV_IMPORT_ERROR is not None or not _SEV_INDEX_PATH.exists():
         return False
     return importlib.util.find_spec("sentence_transformers") is not None
+
+
+def fusion_available() -> bool:
+    """Fusion needs the LogReg model, SEV, and the fusion module."""
+    return _FUSION_IMPORT_ERROR is None and sev_available()
 
 
 @st.cache_resource(show_spinner="Loading Semantic Evidence Voting index…")
@@ -261,6 +295,35 @@ def get_sev_voter():
 
 def predict_with_method(text: str, method: str) -> dict[str, Any] | None:
     """Unified prediction dict for either model (keys are model-agnostic)."""
+    if method == METHOD_FUSION:
+        try:
+            lr = ml_predict(text)
+            sev = get_sev_voter().predict_one(text)
+            if not lr:
+                return None
+            fused = fusion_module.fuse(lr["class_scores"], sev["vote_proportions"], get_fusion_config())
+            meta_labels = {
+                "logreg": fused["logreg_label"], "sev": fused["sev_label"],
+            }
+            note = (
+                f"Fused score = {fused['weight']:.0%} Logistic Regression + "
+                f"{1 - fused['weight']:.0%} SEV (weight tuned on validation). "
+                "Not a probability of real-world correctness."
+            )
+            return {
+                "method": METHOD_FUSION,
+                "predicted_label": fused["predicted_label"],
+                "scores": fused["scores"],
+                "confidence": fused["confidence"],
+                "score_label": "fused score",
+                "score_note": note,
+                "supporting_examples": sev["supporting_examples"],
+                "description": triage_model_v2.LABEL_DESCRIPTIONS.get(fused["predicted_label"], ""),
+                "human_review_note": "Verify the transcript, current danger, caller location, and appropriate response with a trained operator.",
+                "fusion": {**fused, "component_labels": meta_labels},
+            }
+        except Exception:
+            return None
     if method == METHOD_SEV:
         try:
             r = get_sev_voter().predict_one(text)
@@ -490,24 +553,31 @@ if st.session_state.get("_last_sample_choice") != sample_choice:
 
 st.sidebar.divider()
 
-# Model selector: Logistic Regression (default) vs Semantic Evidence Voting.
+# Model selector: Logistic Regression (default), SEV, and Evidence Fusion.
 _sev_ok = sev_available()
-_method_options = [METHOD_LOGREG] + ([METHOD_SEV] if _sev_ok else [])
+_fusion_ok = fusion_available()
+_method_options = [METHOD_LOGREG]
+if _sev_ok:
+    _method_options.append(METHOD_SEV)
+if _fusion_ok:
+    _method_options.append(METHOD_FUSION)
 triage_method = st.sidebar.radio(
     "Triage model",
     _method_options,
     index=0,
     help=(
-        "Logistic Regression (word+char TF-IDF) is the default and, on our untouched "
-        "held-out test, the stronger model. Semantic Evidence Voting is an experimental "
-        "multilingual-embedding method shown for transparency and comparison."
+        "Logistic Regression (word+char TF-IDF) is the default. Semantic Evidence Voting "
+        "is an experimental multilingual-embedding method. Evidence Fusion blends the two "
+        "class-score vectors with a validation-tuned weight and flags disagreement / "
+        "low-confidence cases for human review."
     ),
 )
 if not _sev_ok:
-    st.sidebar.caption("Semantic Evidence Voting unavailable (needs sentence-transformers + built index).")
+    st.sidebar.caption("Semantic Evidence Voting / Fusion unavailable (needs sentence-transformers + built index).")
 st.sidebar.caption(
-    "Held-out macro F1 — LogReg 0.939 · SEV 0.748. LogReg is stronger on this "
-    "romanized-Hinglish corpus; SEV is not presented as an improvement."
+    "Held-out macro F1 (train/val/test split) — LogReg 0.772 · SEV 0.615 · Fusion 0.776. "
+    "Fusion is marginally best (≈ tied with LogReg; +1 example); SEV is weaker on this "
+    "romanized-Hinglish corpus. No method is claimed as a validated improvement."
 )
 
 if ml_predict("status check") is not None:
@@ -700,14 +770,37 @@ if st.session_state.last_analysis is not None:
                 unsafe_allow_html=True,
             )
 
+        # Evidence Fusion: show component agreement and the human-review flag.
+        if prediction and prediction.get("fusion"):
+            fz = prediction["fusion"]
+            st.write("")
+            lr_m, sev_m = ml_meta(fz["logreg_label"]), ml_meta(fz["sev_label"])
+            agree_badge = ("b-unclear", "✅ Models agree") if fz["models_agree"] else ("b-support", "⚠️ Models disagree")
+            st.markdown(
+                '<div class="eyebrow">Component models</div>'
+                f'<div class="kv"><span class="chip">Logistic Regression → {lr_m["emoji"]} {lr_m["title"]}</span>'
+                f'<span class="chip">SEV → {sev_m["emoji"]} {sev_m["title"]}</span>'
+                f'<span class="triage-badge {agree_badge[0]} badge-sm">{agree_badge[1]}</span></div>',
+                unsafe_allow_html=True,
+            )
+            if fz["review_flag"]:
+                st.warning("🚩 Flagged for human review: " + " ".join(fz["review_reasons"]))
+            else:
+                st.caption("No fusion review flag raised (models agree and the fused score is confident). Human verification is still required.")
+
         if prediction and prediction.get("scores"):
             st.write("")
-            bars_label = "Vote proportions" if method_used == METHOD_SEV else "Model class scores (uncalibrated)"
+            if method_used == METHOD_SEV:
+                bars_label = "Vote proportions"
+            elif method_used == METHOD_FUSION:
+                bars_label = "Fused class scores"
+            else:
+                bars_label = "Model class scores (uncalibrated)"
             st.markdown(f'<div class="eyebrow">{bars_label}</div>', unsafe_allow_html=True)
             render_score_bars(prediction["scores"])
             st.caption(prediction.get("score_note", "Uncalibrated output; not a probability of real-world correctness."))
 
-        # Semantic Evidence Voting: show the nearest training examples transparently.
+        # Semantic Evidence Voting / Fusion: show the nearest training examples transparently.
         if prediction and prediction.get("supporting_examples"):
             st.write("")
             st.markdown('<div class="eyebrow">Supporting training examples (nearest neighbours)</div>', unsafe_allow_html=True)

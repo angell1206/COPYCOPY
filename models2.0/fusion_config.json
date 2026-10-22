@@ -1,0 +1,6 @@
+{
+  "weight": 0.7,
+  "low_confidence": 0.5,
+  "low_margin": 0.15,
+  "note": "LogReg share of the fused score, tuned on the validation split only."
+}
