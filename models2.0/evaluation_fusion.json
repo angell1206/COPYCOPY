@@ -1,0 +1,144 @@
+{
+  "note": "Grouped train/val/test split by scenario_family (seed 42; test 20%, val 20%, train 60%+augmentation). SEV retrieval pool = train only; fusion weight tuned on validation only. Test set is untouched. Scores are on synthetic data and are not evidence of real-world performance.",
+  "fusion_weight_logreg_share": 0.7,
+  "fusion_weight_val_macro_f1": {
+    "0.0": 0.702456864216054,
+    "0.1": 0.702456864216054,
+    "0.2": 0.702456864216054,
+    "0.3": 0.7501992666985493,
+    "0.4": 0.7501992666985493,
+    "0.5": 0.7692420666142145,
+    "0.6": 0.8170245066146172,
+    "0.7": 0.8335097001763668,
+    "0.8": 0.8162876955329784,
+    "0.9": 0.814294996751137,
+    "1.0": 0.814294996751137
+  },
+  "test_rows": 52,
+  "logistic_regression": {
+    "accuracy": 0.7692307692307693,
+    "macro_f1": 0.7722545653580136,
+    "priority_recall": 1.0,
+    "per_class": {
+      "PRIORITY_REVIEW": {
+        "precision": 0.7058823529411765,
+        "recall": 1.0,
+        "f1-score": 0.8275862068965517,
+        "support": 12.0
+      },
+      "SUPPORT_REVIEW": {
+        "precision": 0.6956521739130435,
+        "recall": 0.8421052631578947,
+        "f1-score": 0.7619047619047619,
+        "support": 19.0
+      },
+      "UNCLEAR_REVIEW": {
+        "precision": 1.0,
+        "recall": 0.5714285714285714,
+        "f1-score": 0.7272727272727273,
+        "support": 21.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        12,
+        0,
+        0
+      ],
+      [
+        3,
+        16,
+        0
+      ],
+      [
+        2,
+        7,
+        12
+      ]
+    ]
+  },
+  "semantic_evidence_voting": {
+    "accuracy": 0.6153846153846154,
+    "macro_f1": 0.6153239714215323,
+    "priority_recall": 1.0,
+    "per_class": {
+      "PRIORITY_REVIEW": {
+        "precision": 0.5714285714285714,
+        "recall": 1.0,
+        "f1-score": 0.7272727272727273,
+        "support": 12.0
+      },
+      "SUPPORT_REVIEW": {
+        "precision": 0.5454545454545454,
+        "recall": 0.631578947368421,
+        "f1-score": 0.5853658536585366,
+        "support": 19.0
+      },
+      "UNCLEAR_REVIEW": {
+        "precision": 0.8888888888888888,
+        "recall": 0.38095238095238093,
+        "f1-score": 0.5333333333333333,
+        "support": 21.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        12,
+        0,
+        0
+      ],
+      [
+        6,
+        12,
+        1
+      ],
+      [
+        3,
+        10,
+        8
+      ]
+    ]
+  },
+  "evidence_fusion": {
+    "accuracy": 0.7692307692307693,
+    "macro_f1": 0.7762005436424042,
+    "priority_recall": 1.0,
+    "per_class": {
+      "PRIORITY_REVIEW": {
+        "precision": 0.75,
+        "recall": 1.0,
+        "f1-score": 0.8571428571428571,
+        "support": 12.0
+      },
+      "SUPPORT_REVIEW": {
+        "precision": 0.6666666666666666,
+        "recall": 0.8421052631578947,
+        "f1-score": 0.7441860465116279,
+        "support": 19.0
+      },
+      "UNCLEAR_REVIEW": {
+        "precision": 1.0,
+        "recall": 0.5714285714285714,
+        "f1-score": 0.7272727272727273,
+        "support": 21.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        12,
+        0,
+        0
+      ],
+      [
+        3,
+        16,
+        0
+      ],
+      [
+        1,
+        8,
+        12
+      ]
+    ]
+  }
+}
