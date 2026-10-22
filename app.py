@@ -540,362 +540,375 @@ def find_related_complaints(
 # Sidebar
 # -----------------------------------------------------------------------------
 st.sidebar.markdown("### 🛡️ Operator Console")
-st.sidebar.caption("Select an example or enter a transcript for analysis.")
+st.sidebar.caption("Navigate between triage, model evaluation, and emergency resources.")
 
-sample_choice = st.sidebar.selectbox(
-    "Load an example transcript",
-    ["Custom transcript", *SAMPLE_TRANSCRIPTS.keys()],
-    key="sample_choice",
+selected_page = st.sidebar.radio(
+    "Menu",
+    [
+        "Triage Dashboard",
+        "Model Performance & Comparison",
+        "Emergency Assistance & Nearby Resources",
+    ],
+    index=0,
+    key="sidebar_navigation",
 )
-if st.session_state.get("_last_sample_choice") != sample_choice:
-    st.session_state.transcript_input = SAMPLE_TRANSCRIPTS.get(sample_choice, "")
-    st.session_state._last_sample_choice = sample_choice
-
 st.sidebar.divider()
 
-# Model selector: Logistic Regression (default), SEV, and Evidence Fusion.
-_sev_ok = sev_available()
-_fusion_ok = fusion_available()
-_method_options = [METHOD_LOGREG]
-if _sev_ok:
-    _method_options.append(METHOD_SEV)
-if _fusion_ok:
-    _method_options.append(METHOD_FUSION)
-triage_method = st.sidebar.radio(
-    "Triage model",
-    _method_options,
-    index=0,
-    help=(
-        "Logistic Regression (word+char TF-IDF) is the default. Semantic Evidence Voting "
-        "is an experimental multilingual-embedding method. Evidence Fusion blends the two "
-        "class-score vectors with a validation-tuned weight and flags disagreement / "
-        "low-confidence cases for human review."
-    ),
-)
-if not _sev_ok:
-    st.sidebar.caption("Semantic Evidence Voting / Fusion unavailable (needs sentence-transformers + built index).")
-st.sidebar.caption(
-    "Model metrics are read from saved evaluation reports below; no performance values are hard-coded."
-)
 
-if ml_predict("status check") is not None:
-    st.sidebar.success("ML triage model: loaded", icon="✅")
-else:
-    st.sidebar.error("ML model unavailable — keyword rules only.", icon="⚠️")
-if get_sarvam_api_key():
-    st.sidebar.success("Sarvam API key: configured", icon="🎙️")
-else:
-    st.sidebar.info("Sarvam key not set — typed transcripts still work.", icon="🎙️")
-
-st.sidebar.markdown("**Pipeline (v2.1)**")
-st.sidebar.markdown(
-    "- ML classifier · word+char TF-IDF → Logistic Regression (`models2.0`)\n"
-    "- Experimental · Semantic Evidence Voting (multilingual embeddings)\n"
-    "- Transparent keyword evidence (`triage_rules`)\n"
-    "- Optional Sarvam AI speech-to-text\n"
-    "- Location & missing-detail flags\n"
-    "- Lexical similarity (thresholded)\n"
-    "- Session-only case history"
-)
-st.sidebar.caption(
-    "Class scores / vote proportions are uncalibrated model outputs, not probabilities "
-    "of real-world correctness."
-)
-
-
-# -----------------------------------------------------------------------------
-# 1. Incoming complaint (audio → Sarvam → transcript, or typed)
-# -----------------------------------------------------------------------------
-def clear_transcript() -> None:
-    """Reset input + results. Runs as a callback (before the widget re-instantiates)."""
-    st.session_state.transcript_input = ""
-    st.session_state.last_analysis = None
-    st.session_state.last_prediction = None
-    st.session_state.last_transcript = ""
-    st.session_state.last_case_id = None
-    st.session_state.last_detected_language = None
-
-
-with st.container(border=True):
-    card_header("Step 1", "Incoming complaint")
-    st.markdown(
-        '<div class="muted">Upload a short audio clip (transcribed via Sarvam AI) or type a transcript directly.</div>',
-        unsafe_allow_html=True,
+if selected_page == "Triage Dashboard":
+    sample_choice = st.sidebar.selectbox(
+        "Load an example transcript",
+        ["Custom transcript", *SAMPLE_TRANSCRIPTS.keys()],
+        key="sample_choice",
     )
-    st.write("")
+    if st.session_state.get("_last_sample_choice") != sample_choice:
+        st.session_state.transcript_input = SAMPLE_TRANSCRIPTS.get(sample_choice, "")
+        st.session_state._last_sample_choice = sample_choice
 
-    audio_col, mode_col = st.columns([2, 1])
-    with audio_col:
-        audio_file = st.file_uploader(
-            "Audio recording (short clips, ~30s, for synchronous transcription)",
-            type=AUDIO_TYPES,
-            help="Use audio you are authorised to process. Audio is sent to Sarvam AI only when you request transcription.",
-        )
-    with mode_col:
-        sarvam_mode = st.selectbox(
-            "Transcription style",
-            ["transcribe", "codemix", "translit"],
-            index=0,
-            help="Choose the transcription style that best matches the recording language.",
-        )
-
-    consent = st.checkbox(
-        "I confirm I am authorised to process this audio and send it to Sarvam AI for transcription.",
-        key="audio_consent",
+    # Model selector: Logistic Regression (default), SEV, and Evidence Fusion.
+    _sev_ok = sev_available()
+    _fusion_ok = fusion_available()
+    _method_options = [METHOD_LOGREG]
+    if _sev_ok:
+        _method_options.append(METHOD_SEV)
+    if _fusion_ok:
+        _method_options.append(METHOD_FUSION)
+    triage_method = st.sidebar.radio(
+        "Triage model",
+        _method_options,
+        index=0,
+        help=(
+            "Logistic Regression (word+char TF-IDF) is the default. Semantic Evidence Voting "
+            "is an experimental multilingual-embedding method. Evidence Fusion blends the two "
+            "class-score vectors with a validation-tuned weight and flags disagreement / "
+            "low-confidence cases for human review."
+        ),
+    )
+    if not _sev_ok:
+        st.sidebar.caption("Semantic Evidence Voting / Fusion unavailable (needs sentence-transformers + built index).")
+    st.sidebar.caption(
+        "Model metrics are read from saved evaluation reports below; no performance values are hard-coded."
     )
 
-    t_col, _ = st.columns([1.3, 2.4])
-    with t_col:
-        transcribe_clicked = st.button(
-            "🎙️ Transcribe with Sarvam",
-            use_container_width=True,
-            disabled=audio_file is None,
-        )
-
-    if transcribe_clicked:
-        if not consent:
-            st.error("Please confirm you are authorised to process and send this audio to Sarvam before transcription.")
-        elif not get_sarvam_api_key():
-            st.error("Sarvam API key is missing. Configure SARVAM_API_KEY in Streamlit Secrets or the environment.")
-        elif audio_file is not None:
-            try:
-                with st.spinner("Transcribing audio with Sarvam…"):
-                    transcript_result, detected_language = transcribe_audio(
-                        audio_file.getvalue(), audio_file.name, sarvam_mode
-                    )
-                st.session_state.transcript_input = transcript_result
-                st.session_state.last_detected_language = detected_language
-                st.success("Transcription complete. Review and correct the text below before analysis.")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Transcription failed: {type(exc).__name__}: {exc}")
-                st.info("You can still enter or paste a transcript manually below.")
-
-    if st.session_state.get("last_detected_language"):
-        st.caption(f"Sarvam detected language: {st.session_state.last_detected_language}")
-
-    transcript = st.text_area(
-        "Call transcript — review before analysis",
-        key="transcript_input",
-        height=140,
-        placeholder="Enter a transcript in English, Hindi, or Romanized Hinglish…",
-        help="Original text is kept for operator review. ML classifies routing; keyword rules add transparent evidence.",
-        label_visibility="collapsed",
-    )
-    col_analyse, col_clear, _ = st.columns([1.1, 1, 2.4])
-    with col_analyse:
-        analyze_clicked = st.button("🔍 Analyse transcript", type="primary", use_container_width=True)
-    with col_clear:
-        st.button("Clear", use_container_width=True, on_click=clear_transcript)
-
-if analyze_clicked:
-    if not transcript.strip():
-        st.warning("Enter a transcript before analysing.")
+    if ml_predict("status check") is not None:
+        st.sidebar.success("ML triage model: loaded", icon="✅")
     else:
-        result = analyze_transcript(transcript)
-        with st.spinner(f"Analysing with {triage_method}…"):
-            prediction = predict_with_method(transcript.strip(), triage_method)
-        case_id = f"HL-{st.session_state.case_counter:04d}"
-        st.session_state.case_counter += 1
-        created_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-        st.session_state.cases.append(
-            make_case(case_id, transcript.strip(), created_at, method=triage_method)
-        )
-        st.session_state.last_analysis = result
-        st.session_state.last_prediction = prediction
-        st.session_state.last_transcript = transcript.strip()
-        st.session_state.last_case_id = case_id
+        st.sidebar.error("ML model unavailable — keyword rules only.", icon="⚠️")
+    if get_sarvam_api_key():
+        st.sidebar.success("Sarvam API key: configured", icon="🎙️")
+    else:
+        st.sidebar.info("Sarvam key not set — typed transcripts still work.", icon="🎙️")
+
+    st.sidebar.markdown("**Pipeline (v2.1)**")
+    st.sidebar.markdown(
+        "- ML classifier · word+char TF-IDF → Logistic Regression (`models2.0`)\n"
+        "- Experimental · Semantic Evidence Voting (multilingual embeddings)\n"
+        "- Transparent keyword evidence (`triage_rules`)\n"
+        "- Optional Sarvam AI speech-to-text\n"
+        "- Location & missing-detail flags\n"
+        "- Lexical similarity (thresholded)\n"
+        "- Session-only case history"
+    )
+    st.sidebar.caption(
+        "Class scores / vote proportions are uncalibrated model outputs, not probabilities "
+        "of real-world correctness."
+    )
 
 
-# -----------------------------------------------------------------------------
-# Results
-# -----------------------------------------------------------------------------
-def render_score_bars(class_scores: dict[str, float]) -> None:
-    rows_html = []
-    for label in ["PRIORITY_REVIEW", "SUPPORT_REVIEW", "UNCLEAR_REVIEW"]:
-        if label not in class_scores:
-            continue
-        meta = ml_meta(label)
-        pct = class_scores[label] * 100
-        rows_html.append(
-            f'<div class="score-row"><div class="score-label">'
-            f'<span>{meta["emoji"]} {meta["title"]}</span><span>{pct:.0f}%</span></div>'
-            f'<div class="score-track"><div class="score-fill {meta["fill"]}" '
-            f'style="width:{pct:.0f}%"></div></div></div>'
-        )
-    st.markdown("".join(rows_html), unsafe_allow_html=True)
+if selected_page == "Triage Dashboard":
+    # -----------------------------------------------------------------------------
+    # 1. Incoming complaint (audio → Sarvam → transcript, or typed)
+    # -----------------------------------------------------------------------------
+    def clear_transcript() -> None:
+        """Reset input + results. Runs as a callback (before the widget re-instantiates)."""
+        st.session_state.transcript_input = ""
+        st.session_state.last_analysis = None
+        st.session_state.last_prediction = None
+        st.session_state.last_transcript = ""
+        st.session_state.last_case_id = None
+        st.session_state.last_detected_language = None
 
 
-if st.session_state.last_analysis is not None:
-    result = st.session_state.last_analysis
-    prediction = st.session_state.last_prediction
-    case_id = st.session_state.last_case_id
-    current_case = next((c for c in st.session_state.cases if c["case_id"] == case_id), None)
-    review_status = current_case.get("review_status", "Pending review") if current_case else "Pending review"
-
-    method_used = prediction.get("method", METHOD_LOGREG) if prediction else METHOD_LOGREG
-    score_label = prediction.get("score_label", "model score") if prediction else "model score"
     with st.container(border=True):
-        card_header("Step 2", f"Triage result · case {case_id}")
+        card_header("Step 1", "Incoming complaint")
         st.markdown(
-            f'<div class="muted">Model: <b>{method_used}</b> · routing label with rule-based evidence · '
-            f'uncalibrated {score_label}, not a validated risk score</div>',
+            '<div class="muted">Upload a short audio clip (transcribed via Sarvam AI) or type a transcript directly.</div>',
             unsafe_allow_html=True,
         )
         st.write("")
-        head_l, head_r = st.columns([1.5, 1])
-        with head_l:
-            if prediction and "predicted_label" in prediction:
-                meta = ml_meta(prediction["predicted_label"])
-                conf = prediction["confidence"] * 100
-                st.markdown(
-                    f'<span class="triage-badge {meta["badge"]}">{meta["emoji"]} {meta["title"]}</span>'
-                    f'<span class="muted" style="margin-left:0.6rem;">{score_label} {conf:.0f}%</span>',
-                    unsafe_allow_html=True,
-                )
-                st.markdown(f'<div class="muted" style="margin-top:0.45rem;">{prediction.get("description","")}</div>', unsafe_allow_html=True)
-                if result["urgency"] == "Critical" and prediction["predicted_label"] != "PRIORITY_REVIEW":
-                    st.error(
-                        "⚠️ Keyword rules flagged possible CRITICAL indicators while the ML label is "
-                        f"'{meta['title']}'. Treat as priority and verify the transcript immediately."
-                    )
-            else:
-                st.error("Selected model unavailable — showing keyword-rule evidence only.")
-        with head_r:
-            st.markdown(
-                '<div class="eyebrow">Operator review</div>'
-                f'<span class="triage-badge b-neutral badge-sm">📋 {review_status}</span>',
-                unsafe_allow_html=True,
+
+        audio_col, mode_col = st.columns([2, 1])
+        with audio_col:
+            audio_file = st.file_uploader(
+                "Audio recording (short clips, ~30s, for synchronous transcription)",
+                type=AUDIO_TYPES,
+                help="Use audio you are authorised to process. Audio is sent to Sarvam AI only when you request transcription.",
+            )
+        with mode_col:
+            sarvam_mode = st.selectbox(
+                "Transcription style",
+                ["transcribe", "codemix", "translit"],
+                index=0,
+                help="Choose the transcription style that best matches the recording language.",
             )
 
-        # Evidence Fusion: show component agreement and the human-review flag.
-        if prediction and prediction.get("fusion"):
-            fz = prediction["fusion"]
-            st.write("")
-            lr_m, sev_m = ml_meta(fz["logreg_label"]), ml_meta(fz["sev_label"])
-            agree_badge = ("b-unclear", "✅ Models agree") if fz["models_agree"] else ("b-support", "⚠️ Models disagree")
-            st.markdown(
-                '<div class="eyebrow">Component models</div>'
-                f'<div class="kv"><span class="chip">Logistic Regression → {lr_m["emoji"]} {lr_m["title"]}</span>'
-                f'<span class="chip">SEV → {sev_m["emoji"]} {sev_m["title"]}</span>'
-                f'<span class="triage-badge {agree_badge[0]} badge-sm">{agree_badge[1]}</span></div>',
-                unsafe_allow_html=True,
-            )
-            if fz["review_flag"]:
-                st.warning("🚩 Flagged for human review: " + " ".join(fz["review_reasons"]))
-            else:
-                st.caption("No fusion review flag raised (models agree and the fused score is confident). Human verification is still required.")
-
-        if prediction and prediction.get("scores"):
-            st.write("")
-            if method_used == METHOD_SEV:
-                bars_label = "Vote proportions"
-            elif method_used == METHOD_FUSION:
-                bars_label = "Fused class scores"
-            else:
-                bars_label = "Model class scores (uncalibrated)"
-            st.markdown(f'<div class="eyebrow">{bars_label}</div>', unsafe_allow_html=True)
-            render_score_bars(prediction["scores"])
-            st.caption(prediction.get("score_note", "Uncalibrated output; not a probability of real-world correctness."))
-
-        # Semantic Evidence Voting / Fusion: show the nearest training examples transparently.
-        if prediction and prediction.get("supporting_examples"):
-            st.write("")
-            st.markdown('<div class="eyebrow">Supporting training examples (nearest neighbours)</div>', unsafe_allow_html=True)
-            for ex in prediction["supporting_examples"]:
-                ex_meta = ml_meta(ex["label"])
-                snippet = ex["transcript"] if len(ex["transcript"]) <= 110 else ex["transcript"][:107] + "…"
-                st.markdown(
-                    f'<div class="kv"><span class="triage-badge {ex_meta["badge"]} badge-sm">{ex_meta["emoji"]} {ex_meta["title"]}</span>'
-                    f'<span class="muted" style="margin-left:0.5rem;">similarity {ex["similarity"]*100:.0f}%</span><br>'
-                    f'<span style="font-size:0.88rem;">“{snippet}”</span></div>',
-                    unsafe_allow_html=True,
-                )
-            st.caption("These are the labelled training transcripts most similar to this input. Similarity is not proof of a shared caller or incident; a human must verify.")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        with st.container(border=True):
-            card_header("Evidence", "🔎 Detected cues (rules)")
-            st.markdown(f'<div class="kv"><b>Possible concern:</b> {result["threat"]}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="kv"><b>Suggested queue:</b> {result["suggested_queue"]}</div>', unsafe_allow_html=True)
-            loc = ", ".join(result["location_clues"]) if result["location_clues"] else "Not identified"
-            st.markdown(f'<div class="kv"><b>Location clue(s):</b> {loc}</div>', unsafe_allow_html=True)
-            st.caption("A location clue is unverified text, not a confirmed current location or address.")
-            st.markdown('<div class="eyebrow" style="margin-top:0.4rem;">Matched text indicators</div>', unsafe_allow_html=True)
-            if result["evidence"]:
-                st.markdown("".join(f'<span class="chip chip-sage">{p}</span>' for p in result["evidence"]), unsafe_allow_html=True)
-            else:
-                st.markdown('<span class="muted">No configured indicator phrase matched.</span>', unsafe_allow_html=True)
-            st.caption("A matched phrase is a review cue, not proof that an event occurred.")
-    with c2:
-        with st.container(border=True):
-            card_header("Verify", "✅ Information to confirm")
-            for item in result["missing"]:
-                st.markdown(f'<div class="verify-item">{item}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="eyebrow" style="margin-top:0.4rem;">Suggested operator next step</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="kv">{result["next_step"]}</div>', unsafe_allow_html=True)
-            if prediction and "human_review_note" in prediction:
-                st.caption(prediction["human_review_note"])
-
-    with st.container(border=True):
-        card_header("Step 3", "Operator review")
-        st.markdown(
-            '<div class="muted">Distinguish model/rule output above from operator-confirmed findings below. '
-            'Saving does not contact services or dispatch help.</div>',
-            unsafe_allow_html=True,
+        consent = st.checkbox(
+            "I confirm I am authorised to process this audio and send it to Sarvam AI for transcription.",
+            key="audio_consent",
         )
-        st.write("")
-        if current_case is not None:
-            status_key = f"review_status_{case_id}"
-            notes_key = f"review_notes_{case_id}"
-            st.session_state.setdefault(status_key, current_case.get("review_status", "Pending review"))
-            st.session_state.setdefault(notes_key, current_case.get("operator_notes", ""))
-            rc1, rc2 = st.columns([1, 1.4])
-            with rc1:
-                status = st.selectbox(
-                    "Operator-confirmed outcome",
-                    [
-                        "Pending review",
-                        "Reviewed — more information needed",
-                        "Reviewed — follow-up required",
-                        "Reviewed — no further action recorded",
-                        "Escalated according to local protocol",
-                    ],
-                    key=status_key,
-                )
-            with rc2:
-                notes = st.text_area(
-                    "Operator notes",
-                    key=notes_key,
-                    placeholder="Record what was verified, without adding real personal data.",
-                    height=90,
-                )
-            if st.button("💾 Save operator review", key=f"save_review_{case_id}"):
-                for case in st.session_state.cases:
-                    if case["case_id"] == case_id:
-                        case["review_status"] = status
-                        case["operator_notes"] = notes.strip()
-                        break
-                st.success("Operator review saved to this browser session.")
 
-    with st.container(border=True):
-        card_header("Step 4", "Related transcripts")
-        matches, best = find_related_complaints(
-            st.session_state.last_transcript, st.session_state.cases, exclude_case_id=case_id
-        )
-        if matches.empty:
-            st.info(
-                f"No strong matches found (highest lexical overlap was {best * 100:.0f}%, "
-                f"below the {RELATED_THRESHOLD * 100:.0f}% threshold for a related candidate).",
-                icon="🔗",
+        t_col, _ = st.columns([1.3, 2.4])
+        with t_col:
+            transcribe_clicked = st.button(
+                "🎙️ Transcribe with Sarvam",
+                use_container_width=True,
+                disabled=audio_file is None,
             )
+
+        if transcribe_clicked:
+            if not consent:
+                st.error("Please confirm you are authorised to process and send this audio to Sarvam before transcription.")
+            elif not get_sarvam_api_key():
+                st.error("Sarvam API key is missing. Configure SARVAM_API_KEY in Streamlit Secrets or the environment.")
+            elif audio_file is not None:
+                try:
+                    with st.spinner("Transcribing audio with Sarvam…"):
+                        transcript_result, detected_language = transcribe_audio(
+                            audio_file.getvalue(), audio_file.name, sarvam_mode
+                        )
+                    st.session_state.transcript_input = transcript_result
+                    st.session_state.last_detected_language = detected_language
+                    st.success("Transcription complete. Review and correct the text below before analysis.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Transcription failed: {type(exc).__name__}: {exc}")
+                    st.info("You can still enter or paste a transcript manually below.")
+
+        if st.session_state.get("last_detected_language"):
+            st.caption(f"Sarvam detected language: {st.session_state.last_detected_language}")
+
+        transcript = st.text_area(
+            "Call transcript — review before analysis",
+            key="transcript_input",
+            height=140,
+            placeholder="Enter a transcript in English, Hindi, or Romanized Hinglish…",
+            help="Original text is kept for operator review. ML classifies routing; keyword rules add transparent evidence.",
+            label_visibility="collapsed",
+        )
+        col_analyse, col_clear, _ = st.columns([1.1, 1, 2.4])
+        with col_analyse:
+            analyze_clicked = st.button("🔍 Analyse transcript", type="primary", use_container_width=True)
+        with col_clear:
+            st.button("Clear", use_container_width=True, on_click=clear_transcript)
+
+    if analyze_clicked:
+        if not transcript.strip():
+            st.warning("Enter a transcript before analysing.")
         else:
-            st.dataframe(matches, use_container_width=True, hide_index=True)
-        st.caption(
-            "Lexical overlap is a rough word/character comparison, not proof of a shared caller, "
-            "person, or incident. Any potential link must be checked by an authorised human."
-        )
+            result = analyze_transcript(transcript)
+            with st.spinner(f"Analysing with {triage_method}…"):
+                prediction = predict_with_method(transcript.strip(), triage_method)
+            case_id = f"HL-{st.session_state.case_counter:04d}"
+            st.session_state.case_counter += 1
+            created_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+            st.session_state.cases.append(
+                make_case(case_id, transcript.strip(), created_at, method=triage_method)
+            )
+            st.session_state.last_analysis = result
+            st.session_state.last_prediction = prediction
+            st.session_state.last_transcript = transcript.strip()
+            st.session_state.last_case_id = case_id
+
+
+    # -----------------------------------------------------------------------------
+    # Results
+    # -----------------------------------------------------------------------------
+    def render_score_bars(class_scores: dict[str, float]) -> None:
+        rows_html = []
+        for label in ["PRIORITY_REVIEW", "SUPPORT_REVIEW", "UNCLEAR_REVIEW"]:
+            if label not in class_scores:
+                continue
+            meta = ml_meta(label)
+            pct = class_scores[label] * 100
+            rows_html.append(
+                f'<div class="score-row"><div class="score-label">'
+                f'<span>{meta["emoji"]} {meta["title"]}</span><span>{pct:.0f}%</span></div>'
+                f'<div class="score-track"><div class="score-fill {meta["fill"]}" '
+                f'style="width:{pct:.0f}%"></div></div></div>'
+            )
+        st.markdown("".join(rows_html), unsafe_allow_html=True)
+
+
+    if st.session_state.last_analysis is not None:
+        result = st.session_state.last_analysis
+        prediction = st.session_state.last_prediction
+        case_id = st.session_state.last_case_id
+        current_case = next((c for c in st.session_state.cases if c["case_id"] == case_id), None)
+        review_status = current_case.get("review_status", "Pending review") if current_case else "Pending review"
+
+        method_used = prediction.get("method", METHOD_LOGREG) if prediction else METHOD_LOGREG
+        score_label = prediction.get("score_label", "model score") if prediction else "model score"
+        with st.container(border=True):
+            card_header("Step 2", f"Triage result · case {case_id}")
+            st.markdown(
+                f'<div class="muted">Model: <b>{method_used}</b> · routing label with rule-based evidence · '
+                f'uncalibrated {score_label}, not a validated risk score</div>',
+                unsafe_allow_html=True,
+            )
+            st.write("")
+            head_l, head_r = st.columns([1.5, 1])
+            with head_l:
+                if prediction and "predicted_label" in prediction:
+                    meta = ml_meta(prediction["predicted_label"])
+                    conf = prediction["confidence"] * 100
+                    st.markdown(
+                        f'<span class="triage-badge {meta["badge"]}">{meta["emoji"]} {meta["title"]}</span>'
+                        f'<span class="muted" style="margin-left:0.6rem;">{score_label} {conf:.0f}%</span>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(f'<div class="muted" style="margin-top:0.45rem;">{prediction.get("description","")}</div>', unsafe_allow_html=True)
+                    if result["urgency"] == "Critical" and prediction["predicted_label"] != "PRIORITY_REVIEW":
+                        st.error(
+                            "⚠️ Keyword rules flagged possible CRITICAL indicators while the ML label is "
+                            f"'{meta['title']}'. Treat as priority and verify the transcript immediately."
+                        )
+                else:
+                    st.error("Selected model unavailable — showing keyword-rule evidence only.")
+            with head_r:
+                st.markdown(
+                    '<div class="eyebrow">Operator review</div>'
+                    f'<span class="triage-badge b-neutral badge-sm">📋 {review_status}</span>',
+                    unsafe_allow_html=True,
+                )
+
+            # Evidence Fusion: show component agreement and the human-review flag.
+            if prediction and prediction.get("fusion"):
+                fz = prediction["fusion"]
+                st.write("")
+                lr_m, sev_m = ml_meta(fz["logreg_label"]), ml_meta(fz["sev_label"])
+                agree_badge = ("b-unclear", "✅ Models agree") if fz["models_agree"] else ("b-support", "⚠️ Models disagree")
+                st.markdown(
+                    '<div class="eyebrow">Component models</div>'
+                    f'<div class="kv"><span class="chip">Logistic Regression → {lr_m["emoji"]} {lr_m["title"]}</span>'
+                    f'<span class="chip">SEV → {sev_m["emoji"]} {sev_m["title"]}</span>'
+                    f'<span class="triage-badge {agree_badge[0]} badge-sm">{agree_badge[1]}</span></div>',
+                    unsafe_allow_html=True,
+                )
+                if fz["review_flag"]:
+                    st.warning("🚩 Flagged for human review: " + " ".join(fz["review_reasons"]))
+                else:
+                    st.caption("No fusion review flag raised (models agree and the fused score is confident). Human verification is still required.")
+
+            if prediction and prediction.get("scores"):
+                st.write("")
+                if method_used == METHOD_SEV:
+                    bars_label = "Vote proportions"
+                elif method_used == METHOD_FUSION:
+                    bars_label = "Fused class scores"
+                else:
+                    bars_label = "Model class scores (uncalibrated)"
+                st.markdown(f'<div class="eyebrow">{bars_label}</div>', unsafe_allow_html=True)
+                render_score_bars(prediction["scores"])
+                st.caption(prediction.get("score_note", "Uncalibrated output; not a probability of real-world correctness."))
+
+            # Semantic Evidence Voting / Fusion: show the nearest training examples transparently.
+            if prediction and prediction.get("supporting_examples"):
+                st.write("")
+                st.markdown('<div class="eyebrow">Supporting training examples (nearest neighbours)</div>', unsafe_allow_html=True)
+                for ex in prediction["supporting_examples"]:
+                    ex_meta = ml_meta(ex["label"])
+                    snippet = ex["transcript"] if len(ex["transcript"]) <= 110 else ex["transcript"][:107] + "…"
+                    st.markdown(
+                        f'<div class="kv"><span class="triage-badge {ex_meta["badge"]} badge-sm">{ex_meta["emoji"]} {ex_meta["title"]}</span>'
+                        f'<span class="muted" style="margin-left:0.5rem;">similarity {ex["similarity"]*100:.0f}%</span><br>'
+                        f'<span style="font-size:0.88rem;">“{snippet}”</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                st.caption("These are the labelled training transcripts most similar to this input. Similarity is not proof of a shared caller or incident; a human must verify.")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            with st.container(border=True):
+                card_header("Evidence", "🔎 Detected cues (rules)")
+                st.markdown(f'<div class="kv"><b>Possible concern:</b> {result["threat"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="kv"><b>Suggested queue:</b> {result["suggested_queue"]}</div>', unsafe_allow_html=True)
+                loc = ", ".join(result["location_clues"]) if result["location_clues"] else "Not identified"
+                st.markdown(f'<div class="kv"><b>Location clue(s):</b> {loc}</div>', unsafe_allow_html=True)
+                st.caption("A location clue is unverified text, not a confirmed current location or address.")
+                st.markdown('<div class="eyebrow" style="margin-top:0.4rem;">Matched text indicators</div>', unsafe_allow_html=True)
+                if result["evidence"]:
+                    st.markdown("".join(f'<span class="chip chip-sage">{p}</span>' for p in result["evidence"]), unsafe_allow_html=True)
+                else:
+                    st.markdown('<span class="muted">No configured indicator phrase matched.</span>', unsafe_allow_html=True)
+                st.caption("A matched phrase is a review cue, not proof that an event occurred.")
+        with c2:
+            with st.container(border=True):
+                card_header("Verify", "✅ Information to confirm")
+                for item in result["missing"]:
+                    st.markdown(f'<div class="verify-item">{item}</div>', unsafe_allow_html=True)
+                st.markdown('<div class="eyebrow" style="margin-top:0.4rem;">Suggested operator next step</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="kv">{result["next_step"]}</div>', unsafe_allow_html=True)
+                if prediction and "human_review_note" in prediction:
+                    st.caption(prediction["human_review_note"])
+
+        with st.container(border=True):
+            card_header("Step 3", "Operator review")
+            st.markdown(
+                '<div class="muted">Distinguish model/rule output above from operator-confirmed findings below. '
+                'Saving does not contact services or dispatch help.</div>',
+                unsafe_allow_html=True,
+            )
+            st.write("")
+            if current_case is not None:
+                status_key = f"review_status_{case_id}"
+                notes_key = f"review_notes_{case_id}"
+                st.session_state.setdefault(status_key, current_case.get("review_status", "Pending review"))
+                st.session_state.setdefault(notes_key, current_case.get("operator_notes", ""))
+                rc1, rc2 = st.columns([1, 1.4])
+                with rc1:
+                    status = st.selectbox(
+                        "Operator-confirmed outcome",
+                        [
+                            "Pending review",
+                            "Reviewed — more information needed",
+                            "Reviewed — follow-up required",
+                            "Reviewed — no further action recorded",
+                            "Escalated according to local protocol",
+                        ],
+                        key=status_key,
+                    )
+                with rc2:
+                    notes = st.text_area(
+                        "Operator notes",
+                        key=notes_key,
+                        placeholder="Record what was verified, without adding real personal data.",
+                        height=90,
+                    )
+                if st.button("💾 Save operator review", key=f"save_review_{case_id}"):
+                    for case in st.session_state.cases:
+                        if case["case_id"] == case_id:
+                            case["review_status"] = status
+                            case["operator_notes"] = notes.strip()
+                            break
+                    st.success("Operator review saved to this browser session.")
+
+        with st.container(border=True):
+            card_header("Step 4", "Related transcripts")
+            matches, best = find_related_complaints(
+                st.session_state.last_transcript, st.session_state.cases, exclude_case_id=case_id
+            )
+            if matches.empty:
+                st.info(
+                    f"No strong matches found (highest lexical overlap was {best * 100:.0f}%, "
+                    f"below the {RELATED_THRESHOLD * 100:.0f}% threshold for a related candidate).",
+                    icon="🔗",
+                )
+            else:
+                st.dataframe(matches, use_container_width=True, hide_index=True)
+            st.caption(
+                "Lexical overlap is a rough word/character comparison, not proof of a shared caller, "
+                "person, or incident. Any potential link must be checked by an authorised human."
+            )
 
 
 # -----------------------------------------------------------------------------
@@ -1037,7 +1050,7 @@ def _format_metric(value: Any, metric: str) -> str:
     return f"{numeric:.3f}" if metric != "test_samples" else str(int(numeric))
 
 
-with st.expander("📊 Model performance & comparison", expanded=False):
+if selected_page == "Model Performance & Comparison":
     with st.container(border=True):
         card_header("Model evaluation", "📊 Model performance & comparison")
         st.markdown(
@@ -1203,139 +1216,141 @@ def _nearby_emergency_resources(lat: float, lon: float, radius_m: int) -> list[d
     return sorted(results, key=lambda row: row["Distance (km)"])
 
 
-with st.container(border=True):
-    card_header("Step 5", "🚨 Emergency assistance & nearby resources")
-    st.markdown(
-        '<div class="muted">Find mapped police stations, hospitals, clinics and ambulance stations near an operator-entered location.</div>',
-        unsafe_allow_html=True,
-    )
-    st.info(
-        "Resource listings can be incomplete or outdated, and a listed ambulance station does not confirm vehicle availability. "
-        "For an active emergency, follow local emergency protocol immediately; this tool does not dispatch services."
-    )
-    loc_col, radius_col = st.columns([3, 1])
-    with loc_col:
-        emergency_location = st.text_input(
-            "Caller location (enter a nearby landmark, address or locality)",
-            placeholder="e.g., Connaught Place, New Delhi",
-            key="emergency_location_query",
-            help="The location query is sent to OpenStreetMap only when you press Search. Enter a location you are authorised to use.",
+if selected_page == "Emergency Assistance & Nearby Resources":
+    with st.container(border=True):
+        card_header("Step 5", "🚨 Emergency assistance & nearby resources")
+        st.markdown(
+            '<div class="muted">Find mapped police stations, hospitals, clinics and ambulance stations near an operator-entered location.</div>',
+            unsafe_allow_html=True,
         )
-    with radius_col:
-        radius_km = st.selectbox("Search radius", [2, 5, 10, 20], index=1, format_func=lambda x: f"{x} km", key="emergency_radius_km")
-    search_resources = st.button("📍 Find nearby emergency resources", type="primary", use_container_width=True)
-    if search_resources:
-        if not emergency_location.strip():
-            st.error("Enter a location or landmark first.")
-        else:
-            try:
-                with st.spinner("Resolving location and searching mapped emergency resources…"):
-                    geocoded = _geocode_place(emergency_location.strip())
-                    if not geocoded:
-                        st.session_state.emergency_lookup_result = {"error": "Location not found. Try a more specific address or landmark."}
-                    else:
-                        places = _nearby_emergency_resources(geocoded["lat"], geocoded["lon"], int(radius_km * 1000))
-                        st.session_state.emergency_lookup_result = {"location": geocoded, "places": places, "radius_km": radius_km}
-            except requests.RequestException as exc:
-                st.session_state.emergency_lookup_result = {"error": f"The map service could not be reached ({type(exc).__name__}). Please retry later or use an official local directory."}
-            except (ValueError, KeyError) as exc:
-                st.session_state.emergency_lookup_result = {"error": f"Could not process the map response ({type(exc).__name__}). Please retry later."}
-    lookup = st.session_state.get("emergency_lookup_result")
-    if lookup:
-        if lookup.get("error"):
-            st.error(lookup["error"])
-        else:
-            resolved = lookup["location"]
-            places = lookup["places"]
-            st.caption(f"Resolved location: {resolved['display_name']} · Search radius: {lookup['radius_km']} km")
-            if not places:
-                st.info("No matching resources were found in the mapped data within this radius. This does not mean no services exist; verify using official local sources.")
-            else:
-                resource_df = pd.DataFrame(places)
-                type_counts = resource_df["Type"].value_counts().to_dict()
-                count_cols = st.columns(4)
-                for idx, label in enumerate(["Police station", "Hospital", "Clinic", "Ambulance station"]):
-                    count_cols[idx].metric(label, int(type_counts.get(label, 0)))
-                map_df = pd.DataFrame([{"lat": resolved["lat"], "lon": resolved["lon"], "Map point": "Entered location"}] + [
-                    {"lat": item["lat"], "lon": item["lon"], "Map point": item["Resource"]} for item in places
-                ])
-                st.map(map_df, latitude="lat", longitude="lon", size=90, color=None, use_container_width=True)
-                display_df = resource_df[["Resource", "Type", "Distance (km)", "Address", "Phone"]].copy()
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
-                st.markdown("**Directions and contact links**")
-                for item in places[:12]:
-                    directions_url = f"https://www.google.com/maps/dir/?api=1&destination={item['lat']},{item['lon']}"
-                    maps_url = f"https://www.openstreetmap.org/?mlat={item['lat']}&mlon={item['lon']}#map=17/{item['lat']}/{item['lon']}"
-                    phone_text = f" · Phone: {item['Phone']}" if item["Phone"] != "Not listed" else " · Phone not listed"
-                    st.markdown(
-                        f"- **{item['Resource']}** — {item['Type']}, {item['Distance (km)']} km{phone_text} · "
-                        f"[Directions](<{directions_url}>) · [OpenStreetMap](<{maps_url}>)"
-                    )
-                st.caption("Data source: OpenStreetMap contributors via Nominatim and Overpass. Distances are straight-line estimates, not travel times. Confirm the facility and phone number independently before relying on them.")
-
-    # Simple, transparent safety cues from the latest transcript; not a risk classifier.
-    latest_transcript = str(st.session_state.get("last_transcript") or st.session_state.get("transcript_input") or "").strip()
-    if latest_transcript:
-        text_lower = latest_transcript.lower()
-        safety_cues = {
-            "Possible immediate threat / violence": ["he is here", "he's here", "attacking me", "trying to kill", "has a weapon", "gun", "knife", "following me right now", "help me now", "being attacked", "mujhe maar", "maar raha", "ghar mein ghus", "peecha kar raha"],
-            "Possible serious medical emergency": ["not breathing", "can't breathe", "cannot breathe", "unconscious", "not responding", "severe bleeding", "heavy bleeding", "chest pain", "collapsed", "saans nahi", "behosh", "khoon beh", "saans nahin aa"],
-        }
-        matched_cues = [(category, [phrase for phrase in phrases if phrase in text_lower]) for category, phrases in safety_cues.items()]
-        matched_cues = [(category, phrases) for category, phrases in matched_cues if phrases]
-        st.markdown("**Transcript safety-check cues (experimental)**")
-        if matched_cues:
-            for category, phrases in matched_cues:
-                st.error(f"Review promptly: {category}. Matched phrase(s): {', '.join(phrases)}")
-            st.caption("Keyword checks can miss emergencies and can flag harmless or quoted text. A trained operator must verify context and follow local protocol.")
-        else:
-            st.info("No configured safety phrase matched the latest transcript. This is not evidence that the situation is safe.")
-    else:
-        st.caption("Analyse a fictional/authorized transcript above to run the experimental transcript safety checks.")
-
-
-# -----------------------------------------------------------------------------
-# 6. Session case history
-# -----------------------------------------------------------------------------
-with st.container(border=True):
-    card_header("Step 6", "Session case history")
-    st.markdown('<div class="muted">Kept in Streamlit session state only — not a permanent database.</div>', unsafe_allow_html=True)
-    st.write("")
-    if st.session_state.cases:
-        history = pd.DataFrame(st.session_state.cases)
-        display_columns = [
-            "case_id", "model", "ml_label", "ml_score", "rule_cue", "threat", "location",
-            "suggested_queue", "review_status", "created_at", "source",
-        ]
-        export_columns = [
-            "case_id", "transcript", "model", "ml_label", "ml_score", "rule_cue", "threat", "location",
-            "suggested_queue", "created_at", "review_status", "operator_notes", "source",
-        ]
-        for col in set(display_columns + export_columns):
-            if col not in history.columns:
-                history[col] = ""
-        st.dataframe(history[display_columns], use_container_width=True, hide_index=True)
-
-        csv_bytes = history[export_columns].to_csv(index=False).encode("utf-8-sig")
-        hc1, hc2 = st.columns([1, 1])
-        with hc1:
-            st.download_button(
-                "⬇️ Download session history (CSV)", data=csv_bytes,
-                file_name="helpline_triage_session_history.csv", mime="text/csv",
-                use_container_width=True,
+        st.info(
+            "Resource listings can be incomplete or outdated, and a listed ambulance station does not confirm vehicle availability. "
+            "For an active emergency, follow local emergency protocol immediately; this tool does not dispatch services."
+        )
+        loc_col, radius_col = st.columns([3, 1])
+        with loc_col:
+            emergency_location = st.text_input(
+                "Caller location (enter a nearby landmark, address or locality)",
+                placeholder="e.g., Connaught Place, New Delhi",
+                key="emergency_location_query",
+                help="The location query is sent to OpenStreetMap only when you press Search. Enter a location you are authorised to use.",
             )
-        with hc2:
-            if st.button("↺ Reset to built-in examples", use_container_width=True):
-                st.session_state.cases = seed_cases()
-                st.session_state.last_analysis = None
-                st.session_state.last_prediction = None
-                st.session_state.last_transcript = ""
-                st.session_state.last_case_id = None
-                st.session_state.last_detected_language = None
-                st.session_state.case_counter = 1
-                st.rerun()
-    else:
-        st.info("No cases recorded in this session yet.")
+        with radius_col:
+            radius_km = st.selectbox("Search radius", [2, 5, 10, 20], index=1, format_func=lambda x: f"{x} km", key="emergency_radius_km")
+        search_resources = st.button("📍 Find nearby emergency resources", type="primary", use_container_width=True)
+        if search_resources:
+            if not emergency_location.strip():
+                st.error("Enter a location or landmark first.")
+            else:
+                try:
+                    with st.spinner("Resolving location and searching mapped emergency resources…"):
+                        geocoded = _geocode_place(emergency_location.strip())
+                        if not geocoded:
+                            st.session_state.emergency_lookup_result = {"error": "Location not found. Try a more specific address or landmark."}
+                        else:
+                            places = _nearby_emergency_resources(geocoded["lat"], geocoded["lon"], int(radius_km * 1000))
+                            st.session_state.emergency_lookup_result = {"location": geocoded, "places": places, "radius_km": radius_km}
+                except requests.RequestException as exc:
+                    st.session_state.emergency_lookup_result = {"error": f"The map service could not be reached ({type(exc).__name__}). Please retry later or use an official local directory."}
+                except (ValueError, KeyError) as exc:
+                    st.session_state.emergency_lookup_result = {"error": f"Could not process the map response ({type(exc).__name__}). Please retry later."}
+        lookup = st.session_state.get("emergency_lookup_result")
+        if lookup:
+            if lookup.get("error"):
+                st.error(lookup["error"])
+            else:
+                resolved = lookup["location"]
+                places = lookup["places"]
+                st.caption(f"Resolved location: {resolved['display_name']} · Search radius: {lookup['radius_km']} km")
+                if not places:
+                    st.info("No matching resources were found in the mapped data within this radius. This does not mean no services exist; verify using official local sources.")
+                else:
+                    resource_df = pd.DataFrame(places)
+                    type_counts = resource_df["Type"].value_counts().to_dict()
+                    count_cols = st.columns(4)
+                    for idx, label in enumerate(["Police station", "Hospital", "Clinic", "Ambulance station"]):
+                        count_cols[idx].metric(label, int(type_counts.get(label, 0)))
+                    map_df = pd.DataFrame([{"lat": resolved["lat"], "lon": resolved["lon"], "Map point": "Entered location"}] + [
+                        {"lat": item["lat"], "lon": item["lon"], "Map point": item["Resource"]} for item in places
+                    ])
+                    st.map(map_df, latitude="lat", longitude="lon", size=90, color=None, use_container_width=True)
+                    display_df = resource_df[["Resource", "Type", "Distance (km)", "Address", "Phone"]].copy()
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    st.markdown("**Directions and contact links**")
+                    for item in places[:12]:
+                        directions_url = f"https://www.google.com/maps/dir/?api=1&destination={item['lat']},{item['lon']}"
+                        maps_url = f"https://www.openstreetmap.org/?mlat={item['lat']}&mlon={item['lon']}#map=17/{item['lat']}/{item['lon']}"
+                        phone_text = f" · Phone: {item['Phone']}" if item["Phone"] != "Not listed" else " · Phone not listed"
+                        st.markdown(
+                            f"- **{item['Resource']}** — {item['Type']}, {item['Distance (km)']} km{phone_text} · "
+                            f"[Directions](<{directions_url}>) · [OpenStreetMap](<{maps_url}>)"
+                        )
+                    st.caption("Data source: OpenStreetMap contributors via Nominatim and Overpass. Distances are straight-line estimates, not travel times. Confirm the facility and phone number independently before relying on them.")
+
+        # Simple, transparent safety cues from the latest transcript; not a risk classifier.
+        latest_transcript = str(st.session_state.get("last_transcript") or st.session_state.get("transcript_input") or "").strip()
+        if latest_transcript:
+            text_lower = latest_transcript.lower()
+            safety_cues = {
+                "Possible immediate threat / violence": ["he is here", "he's here", "attacking me", "trying to kill", "has a weapon", "gun", "knife", "following me right now", "help me now", "being attacked", "mujhe maar", "maar raha", "ghar mein ghus", "peecha kar raha"],
+                "Possible serious medical emergency": ["not breathing", "can't breathe", "cannot breathe", "unconscious", "not responding", "severe bleeding", "heavy bleeding", "chest pain", "collapsed", "saans nahi", "behosh", "khoon beh", "saans nahin aa"],
+            }
+            matched_cues = [(category, [phrase for phrase in phrases if phrase in text_lower]) for category, phrases in safety_cues.items()]
+            matched_cues = [(category, phrases) for category, phrases in matched_cues if phrases]
+            st.markdown("**Transcript safety-check cues (experimental)**")
+            if matched_cues:
+                for category, phrases in matched_cues:
+                    st.error(f"Review promptly: {category}. Matched phrase(s): {', '.join(phrases)}")
+                st.caption("Keyword checks can miss emergencies and can flag harmless or quoted text. A trained operator must verify context and follow local protocol.")
+            else:
+                st.info("No configured safety phrase matched the latest transcript. This is not evidence that the situation is safe.")
+        else:
+            st.caption("Analyse a fictional/authorized transcript above to run the experimental transcript safety checks.")
+
+
+if selected_page == "Triage Dashboard":
+    # -----------------------------------------------------------------------------
+    # 6. Session case history
+    # -----------------------------------------------------------------------------
+    with st.container(border=True):
+        card_header("Step 6", "Session case history")
+        st.markdown('<div class="muted">Kept in Streamlit session state only — not a permanent database.</div>', unsafe_allow_html=True)
+        st.write("")
+        if st.session_state.cases:
+            history = pd.DataFrame(st.session_state.cases)
+            display_columns = [
+                "case_id", "model", "ml_label", "ml_score", "rule_cue", "threat", "location",
+                "suggested_queue", "review_status", "created_at", "source",
+            ]
+            export_columns = [
+                "case_id", "transcript", "model", "ml_label", "ml_score", "rule_cue", "threat", "location",
+                "suggested_queue", "created_at", "review_status", "operator_notes", "source",
+            ]
+            for col in set(display_columns + export_columns):
+                if col not in history.columns:
+                    history[col] = ""
+            st.dataframe(history[display_columns], use_container_width=True, hide_index=True)
+
+            csv_bytes = history[export_columns].to_csv(index=False).encode("utf-8-sig")
+            hc1, hc2 = st.columns([1, 1])
+            with hc1:
+                st.download_button(
+                    "⬇️ Download session history (CSV)", data=csv_bytes,
+                    file_name="helpline_triage_session_history.csv", mime="text/csv",
+                    use_container_width=True,
+                )
+            with hc2:
+                if st.button("↺ Reset to built-in examples", use_container_width=True):
+                    st.session_state.cases = seed_cases()
+                    st.session_state.last_analysis = None
+                    st.session_state.last_prediction = None
+                    st.session_state.last_transcript = ""
+                    st.session_state.last_case_id = None
+                    st.session_state.last_detected_language = None
+                    st.session_state.case_counter = 1
+                    st.rerun()
+        else:
+            st.info("No cases recorded in this session yet.")
 
 st.caption(
     "Helpline Triage — Logistic Regression, optional Semantic Evidence Voting and Evidence Fusion, "
