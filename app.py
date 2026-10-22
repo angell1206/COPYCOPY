@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import sys
 import tempfile
 import math
@@ -30,6 +31,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from triage_rules import analyze_transcript
+
+import emergency_services as emsvc
 
 AUDIO_TYPES = ["wav", "mp3", "aac", "aiff", "ogg", "opus", "flac", "mp4", "m4a", "amr", "wma", "webm"]
 
@@ -1216,17 +1219,268 @@ def _nearby_emergency_resources(lat: float, lon: float, radius_m: int) -> list[d
     return sorted(results, key=lambda row: row["Distance (km)"])
 
 
-if selected_page == "Emergency Assistance & Nearby Resources":
+# -----------------------------------------------------------------------------
+# Geoapify + Google Places provider (richer path; optional, needs an API key)
+# -----------------------------------------------------------------------------
+def get_geoapify_api_key() -> str | None:
+    """Streamlit Secrets first; GEOAPIFY_API_KEY environment variable as fallback."""
+    try:
+        value = st.secrets.get("GEOAPIFY_API_KEY", None)
+        if value:
+            return str(value).strip()
+    except Exception:
+        pass
+    return emsvc.get_api_key()
+
+
+def get_google_places_api_key() -> str | None:
+    """Streamlit Secrets first; GOOGLE_PLACES_API_KEY environment variable as fallback."""
+    try:
+        value = st.secrets.get("GOOGLE_PLACES_API_KEY", None)
+        if value:
+            return str(value).strip()
+    except Exception:
+        pass
+    return emsvc.get_google_api_key()
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def cached_emergency_search(
+    location: str, resource_types: tuple[str, ...], radius_m: int,
+    api_key: str, google_api_key: str | None = None,
+):
+    """Cache Geoapify/Google lookups for 15 min to respect API limits."""
+    result = emsvc.find_nearby(
+        location, resource_types=resource_types, radius_m=radius_m,
+        api_key=api_key, google_api_key=google_api_key,
+    )
+    return {
+        "query_location": result.query_location,
+        "coordinates": {
+            "lat": result.coordinates.lat, "lon": result.coordinates.lon,
+            "formatted": result.coordinates.formatted,
+        },
+        "radius_m": result.radius_m,
+        "resources": {k: [r.as_dict() for r in v] for k, v in result.resources.items()},
+        "errors": result.errors,
+    }
+
+
+GEO_RESOURCE_LABELS = {
+    "police": "🚓 Police stations",
+    "hospital": "🏥 Hospitals",
+    "clinic": "🩺 Clinics",
+    "pharmacy": "💊 Pharmacies",
+    "ambulance": "🚑 Emergency / ambulance (hospital ER)",
+}
+GEO_RESOURCE_COLORS = {
+    "police": ((60, 107, 109), "#3c6b6d"),
+    "hospital": ((176, 95, 69), "#b05f45"),
+    "clinic": ((169, 132, 63), "#a9843f"),
+    "pharmacy": ((126, 155, 132), "#7e9b84"),
+    "ambulance": ((192, 74, 58), "#c04a3a"),
+}
+GEO_ORIGIN_COLOR = (58, 56, 47)
+
+
+def _geo_render_map(data: dict, chosen: list[str]) -> None:
+    """Interactive pydeck map: colour-coded, hoverable markers + searched origin."""
+    try:
+        import pydeck as pdk
+    except Exception:
+        st.caption("Map unavailable (pydeck not installed) — see the cards below.")
+        return
+    coords = data["coordinates"]
+    points = []
+    for rtype in chosen:
+        rgb = GEO_RESOURCE_COLORS.get(rtype, ((100, 100, 100), "#666"))[0]
+        for r in data["resources"].get(rtype, []):
+            if r["lat"] is None or r["lon"] is None:
+                continue
+            rating = r.get("rating")
+            points.append({
+                "lat": r["lat"], "lon": r["lon"], "name": r["name"],
+                "kind": GEO_RESOURCE_LABELS.get(rtype, rtype),
+                "distance": "—" if r["distance_km"] is None else f"{r['distance_km']} km",
+                "address": r["address"] or "Not available",
+                "phone": r["phone"] or "Not available",
+                "rating": f"{rating}★ ({r.get('reviews_count') or 0})" if rating else "Not available",
+                "color": list(rgb),
+            })
+    points.append({
+        "lat": coords["lat"], "lon": coords["lon"], "name": "📍 Searched location",
+        "kind": data["query_location"], "distance": "—",
+        "address": coords.get("formatted") or "", "phone": "—", "rating": "—",
+        "color": list(GEO_ORIGIN_COLOR),
+    })
+    df = pd.DataFrame(points)
+    layer = pdk.Layer(
+        "ScatterplotLayer", df, get_position="[lon, lat]", get_fill_color="color",
+        get_radius=60, radius_min_pixels=7, radius_max_pixels=22, pickable=True,
+        stroked=True, get_line_color=[255, 253, 248], line_width_min_pixels=1,
+    )
+    view = pdk.ViewState(latitude=coords["lat"], longitude=coords["lon"], zoom=12)
+    tooltip = {
+        "html": "<b>{name}</b><br/>{kind}<br/>📏 {distance}<br/>📍 {address}<br/>📞 {phone}<br/>⭐ {rating}",
+        "style": {"backgroundColor": "#3a382f", "color": "#fffdf8", "fontSize": "12px"},
+    }
+    st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view, tooltip=tooltip,
+                             map_style="light"), use_container_width=True)
+    legend = "".join(
+        f'<span class="chip" style="border-color:{GEO_RESOURCE_COLORS[t][1]};">'
+        f'<span style="color:{GEO_RESOURCE_COLORS[t][1]};font-weight:700;">●</span> {GEO_RESOURCE_LABELS[t]}</span>'
+        for t in chosen if t in GEO_RESOURCE_COLORS
+    )
+    st.markdown(f'<div style="margin-top:0.4rem;">{legend}</div>', unsafe_allow_html=True)
+
+
+def _geo_stars(rating) -> str:
+    if not rating:
+        return ""
+    full = int(round(rating))
+    return "★" * full + "☆" * (5 - full)
+
+
+def _geo_resource_card(r: dict) -> None:
     with st.container(border=True):
-        card_header("Step 5", "🚨 Emergency assistance & nearby resources")
-        st.markdown(
-            '<div class="muted">Find mapped police stations, hospitals, clinics and ambulance stations near an operator-entered location.</div>',
-            unsafe_allow_html=True,
+        dist = "" if r["distance_km"] is None else f'<span class="chip">📏 {r["distance_km"]} km</span>'
+        hexcol = GEO_RESOURCE_COLORS.get(r["type"], ((0, 0, 0), "#666"))[1]
+        type_chip = f'<span class="chip" style="border-color:{hexcol};color:{hexcol};font-weight:700;">{GEO_RESOURCE_LABELS.get(r["type"], r["type"])}</span>'
+        st.markdown(f'<div class="card-title">{r["name"]}</div><div>{type_chip}{dist}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kv"><b>Address:</b> {r["address"] or "Not available"}</div>', unsafe_allow_html=True)
+        phone = r["phone"]
+        if phone:
+            tel = re.sub(r"[^0-9+]", "", phone)
+            st.markdown(f'<div class="kv"><b>Phone:</b> <a href="tel:{tel}">{phone}</a></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="kv"><b>Phone:</b> Not available</div>', unsafe_allow_html=True)
+        rating = r.get("rating")
+        if rating:
+            st.markdown(
+                f'<div class="kv"><b>Rating:</b> <span style="color:#a9843f;">{_geo_stars(rating)}</span> '
+                f'{rating} ({r.get("reviews_count") or 0} reviews)</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="kv"><b>Rating / reviews:</b> Not available</div>', unsafe_allow_html=True)
+        links = []
+        if r.get("directions_url"):
+            links.append(f'<a href="{r["directions_url"]}" target="_blank">🧭 Directions</a>')
+        if r.get("google_url"):
+            links.append(f'<a href="{r["google_url"]}" target="_blank">🗺️ Google Maps listing</a>')
+        if links:
+            st.markdown('<div class="kv">' + " · ".join(links) + "</div>", unsafe_allow_html=True)
+        reviews = r.get("reviews") or []
+        if reviews:
+            with st.expander(f"Read {len(reviews)} Google review(s)"):
+                for rv in reviews:
+                    head = f"**{rv.get('author') or 'Anonymous'}**"
+                    if rv.get("rating"):
+                        head += f" · {_geo_stars(rv['rating'])} {rv['rating']}"
+                    if rv.get("relative_time"):
+                        head += f" · {rv['relative_time']}"
+                    st.markdown(head)
+                    if rv.get("text"):
+                        st.caption(rv["text"])
+
+
+def render_geoapify_body() -> None:
+    """Geoapify + optional Google Places path: form, pydeck map, resource cards."""
+    default_location = ""
+    if st.session_state.get("last_analysis"):
+        default_location = str(st.session_state.last_analysis.get("location") or "")
+        if default_location.startswith("Not identified"):
+            default_location = ""
+
+    with st.form("geoapify_resources_form"):
+        loc = st.text_input(
+            "Caller location (landmark, address or locality)",
+            value=default_location, placeholder="e.g., Connaught Place, New Delhi",
+            help="Sent to Geoapify only when you press Search. Enter a location you are authorised to use.",
         )
-        st.info(
-            "Resource listings can be incomplete or outdated, and a listed ambulance station does not confirm vehicle availability. "
-            "For an active emergency, follow local emergency protocol immediately; this tool does not dispatch services."
-        )
+        fc1, fc2 = st.columns([1, 1.4])
+        with fc1:
+            radius_km = st.slider("Search radius (km)", 1, 25, 5, key="geo_radius")
+        with fc2:
+            chosen = st.multiselect(
+                "Resource types", options=list(GEO_RESOURCE_LABELS.keys()),
+                default=list(emsvc.DEFAULT_RESOURCE_TYPES),
+                format_func=lambda k: GEO_RESOURCE_LABELS.get(k, k),
+            )
+        submitted = st.form_submit_button("📍 Find nearby resources (Geoapify)", type="primary", use_container_width=True)
+
+    if submitted:
+        if not loc.strip():
+            st.session_state.geoapify_result = {"error": "Enter a location to search."}
+        elif not chosen:
+            st.session_state.geoapify_result = {"error": "Select at least one resource type."}
+        else:
+            try:
+                with st.spinner("Searching nearby resources via Geoapify…"):
+                    data = cached_emergency_search(
+                        loc.strip(), tuple(chosen), int(radius_km) * 1000,
+                        get_geoapify_api_key(), get_google_places_api_key(),
+                    )
+                st.session_state.geoapify_result = {"data": data, "chosen": chosen, "radius_km": radius_km}
+            except emsvc.MissingApiKeyError:
+                st.session_state.geoapify_result = {"error": "Geoapify rejected the API key. Check GEOAPIFY_API_KEY."}
+            except emsvc.LocationNotFoundError as exc:
+                st.session_state.geoapify_result = {"error": str(exc)}
+            except emsvc.ApiRequestError as exc:
+                st.session_state.geoapify_result = {"error": f"Lookup failed: {exc}"}
+            except emsvc.EmergencyServiceError as exc:
+                st.session_state.geoapify_result = {"error": f"Lookup error: {exc}"}
+
+    res = st.session_state.get("geoapify_result")
+    if not res:
+        return
+    if res.get("error"):
+        st.error(res["error"])
+        return
+
+    data, chosen, radius_km = res["data"], res["chosen"], res["radius_km"]
+    coords = data["coordinates"]
+    st.caption(
+        f"Matched **{coords['formatted'] or data['query_location']}** "
+        f"({coords['lat']:.4f}, {coords['lon']:.4f}) · radius {radius_km} km"
+    )
+    if data["errors"].get("_google"):
+        st.warning(f"Ratings/reviews unavailable: {data['errors']['_google']}", icon="⭐")
+    elif not get_google_places_api_key():
+        st.caption("Add GOOGLE_PLACES_API_KEY for phone numbers, ratings and reviews. Showing map/listing data only.")
+
+    total = sum(len(v) for v in data["resources"].values())
+    if total == 0:
+        st.info("No matching resources found within this radius. Try a wider radius or a different location.", icon="🔍")
+        return
+
+    _geo_render_map(data, chosen)
+    for rtype in chosen:
+        items = data["resources"].get(rtype, [])
+        err = data["errors"].get(rtype)
+        st.markdown(f"#### {GEO_RESOURCE_LABELS.get(rtype, rtype)}")
+        if err:
+            st.caption(f"⚠️ {err}")
+        elif not items:
+            st.caption("No results in range.")
+        else:
+            card_cols = st.columns(2)
+            for i, r in enumerate(items):
+                with card_cols[i % 2]:
+                    _geo_resource_card(r)
+    st.caption(
+        "Listings via Geoapify (OpenStreetMap-derived); phone, ratings and reviews (where shown) come "
+        "from Google Places, matched by name and location — fields without a confident match read "
+        "'Not available'. Informational only — this tool never contacts or dispatches emergency services."
+    )
+
+
+# Provider labels for the Emergency page selector.
+PROVIDER_OSM = "OpenStreetMap (no API key)"
+PROVIDER_GEOAPIFY = "Geoapify + Google Places (richer, needs key)"
+
+
+def _render_osm_emergency_body() -> None:
+    """Keyless OpenStreetMap (Nominatim + Overpass) path — the default."""
+    with st.container(border=True):
         loc_col, radius_col = st.columns([3, 1])
         with loc_col:
             emergency_location = st.text_input(
@@ -1287,25 +1541,66 @@ if selected_page == "Emergency Assistance & Nearby Resources":
                         )
                     st.caption("Data source: OpenStreetMap contributors via Nominatim and Overpass. Distances are straight-line estimates, not travel times. Confirm the facility and phone number independently before relying on them.")
 
-        # Simple, transparent safety cues from the latest transcript; not a risk classifier.
-        latest_transcript = str(st.session_state.get("last_transcript") or st.session_state.get("transcript_input") or "").strip()
-        if latest_transcript:
-            text_lower = latest_transcript.lower()
-            safety_cues = {
-                "Possible immediate threat / violence": ["he is here", "he's here", "attacking me", "trying to kill", "has a weapon", "gun", "knife", "following me right now", "help me now", "being attacked", "mujhe maar", "maar raha", "ghar mein ghus", "peecha kar raha"],
-                "Possible serious medical emergency": ["not breathing", "can't breathe", "cannot breathe", "unconscious", "not responding", "severe bleeding", "heavy bleeding", "chest pain", "collapsed", "saans nahi", "behosh", "khoon beh", "saans nahin aa"],
-            }
-            matched_cues = [(category, [phrase for phrase in phrases if phrase in text_lower]) for category, phrases in safety_cues.items()]
-            matched_cues = [(category, phrases) for category, phrases in matched_cues if phrases]
-            st.markdown("**Transcript safety-check cues (experimental)**")
-            if matched_cues:
-                for category, phrases in matched_cues:
-                    st.error(f"Review promptly: {category}. Matched phrase(s): {', '.join(phrases)}")
-                st.caption("Keyword checks can miss emergencies and can flag harmless or quoted text. A trained operator must verify context and follow local protocol.")
-            else:
-                st.info("No configured safety phrase matched the latest transcript. This is not evidence that the situation is safe.")
+
+def _emergency_safety_cues() -> None:
+    """Experimental keyword safety cues from the latest transcript (not a classifier)."""
+    latest_transcript = str(st.session_state.get("last_transcript") or st.session_state.get("transcript_input") or "").strip()
+    if not latest_transcript:
+        st.caption("Analyse a fictional/authorized transcript above to run the experimental transcript safety checks.")
+        return
+    text_lower = latest_transcript.lower()
+    safety_cues = {
+        "Possible immediate threat / violence": ["he is here", "he's here", "attacking me", "trying to kill", "has a weapon", "gun", "knife", "following me right now", "help me now", "being attacked", "mujhe maar", "maar raha", "ghar mein ghus", "peecha kar raha"],
+        "Possible serious medical emergency": ["not breathing", "can't breathe", "cannot breathe", "unconscious", "not responding", "severe bleeding", "heavy bleeding", "chest pain", "collapsed", "saans nahi", "behosh", "khoon beh", "saans nahin aa"],
+    }
+    matched_cues = [(category, [phrase for phrase in phrases if phrase in text_lower]) for category, phrases in safety_cues.items()]
+    matched_cues = [(category, phrases) for category, phrases in matched_cues if phrases]
+    st.markdown("**Transcript safety-check cues (experimental)**")
+    if matched_cues:
+        for category, phrases in matched_cues:
+            st.error(f"Review promptly: {category}. Matched phrase(s): {', '.join(phrases)}")
+        st.caption("Keyword checks can miss emergencies and can flag harmless or quoted text. A trained operator must verify context and follow local protocol.")
+    else:
+        st.info("No configured safety phrase matched the latest transcript. This is not evidence that the situation is safe.")
+
+
+if selected_page == "Emergency Assistance & Nearby Resources":
+    with st.container(border=True):
+        card_header("Step 5", "🚨 Emergency assistance & nearby resources")
+        st.markdown(
+            '<div class="muted">Find mapped police stations, hospitals, clinics and ambulance stations near an operator-entered location.</div>',
+            unsafe_allow_html=True,
+        )
+        st.info(
+            "Resource listings can be incomplete or outdated, and a listed ambulance station does not confirm vehicle availability. "
+            "For an active emergency, follow local emergency protocol immediately; this tool does not dispatch services."
+        )
+
+        _geo_key = get_geoapify_api_key()
+        provider = st.radio(
+            "Resource data source",
+            [PROVIDER_OSM, PROVIDER_GEOAPIFY],
+            index=0, horizontal=True, key="emergency_provider",
+            help=(
+                "OpenStreetMap needs no key and is the default. Geoapify adds a colour-coded map and "
+                "(with GOOGLE_PLACES_API_KEY) phone numbers, ratings and reviews."
+            ),
+        )
+        use_geoapify = provider == PROVIDER_GEOAPIFY
+        if use_geoapify and not _geo_key:
+            st.warning(
+                "Geoapify selected but GEOAPIFY_API_KEY is not configured — using OpenStreetMap instead. "
+                "Add the key in Streamlit Secrets to enable the richer path.",
+                icon="📍",
+            )
+            use_geoapify = False
+
+        if use_geoapify:
+            render_geoapify_body()
         else:
-            st.caption("Analyse a fictional/authorized transcript above to run the experimental transcript safety checks.")
+            _render_osm_emergency_body()
+
+        _emergency_safety_cues()
 
 
 if selected_page == "Triage Dashboard":
